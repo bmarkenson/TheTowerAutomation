@@ -36,6 +36,7 @@ public sealed class ControlSurfaceCompatibilityTests
 
         Assert.False(result.IsCompatible);
         Assert.Contains("better_control_model_v2", result.MissingCapabilities);
+        Assert.Contains("active_run_metrics_v1", result.MissingCapabilities);
         Assert.Contains("current_battle_perks_v1", result.MissingCapabilities);
         Assert.Contains(
             "confirmed_local_mapping_status_v2",
@@ -329,6 +330,54 @@ public sealed class ControlSurfaceCompatibilityTests
     }
 
     [Fact]
+    public void StatusDeserializesLiveSaveBackedMetrics()
+    {
+        var response = System.Text.Json.JsonSerializer.Deserialize<StatusResponse>(
+            """
+            {
+              "api_version": 1,
+              "server_revision": 47,
+              "control_model": {
+                "active_run_metrics": {
+                  "schema_version": 1,
+                  "status": "partial",
+                  "reason": "one_or_more_metric_claims_unavailable",
+                  "active_round_identity_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "captured_at": "2026-08-17T20:00:00+00:00",
+                  "age_seconds": 75,
+                  "save_revision": 321,
+                  "checkpoint_wave": 4321,
+                  "whole_run": {
+                    "coins_per_hour": "1780000000000000000",
+                    "cells_per_hour": "590000",
+                    "waves_per_hour": "1250.5",
+                    "effective_game_speed": "4.984"
+                  },
+                  "interval": {
+                    "coins_per_hour": "1810000000000000000"
+                  }
+                }
+              }
+            }
+            """);
+
+        var metrics = response?.ControlModel?.ActiveRunMetrics;
+        Assert.NotNull(metrics);
+        Assert.Equal("partial", metrics!.Status);
+        Assert.Equal(
+            new string('a', 64),
+            metrics.ActiveRoundIdentityFingerprint);
+        Assert.Equal(75, metrics.AgeSeconds);
+        Assert.Equal(321, metrics.SaveRevision);
+        Assert.Equal(4321, metrics.CheckpointWave);
+        Assert.Equal("1780000000000000000", metrics.WholeRun?.CoinsPerHour);
+        Assert.Equal("590000", metrics.WholeRun?.CellsPerHour);
+        Assert.Equal("1250.5", metrics.WholeRun?.WavesPerHour);
+        Assert.Equal("4.984", metrics.WholeRun?.EffectiveGameSpeed);
+        Assert.Equal("1810000000000000000", metrics.Interval?.CoinsPerHour);
+    }
+
+    [Fact]
     public void StatusDeserializesSelectedEmulatorLocation()
     {
         var response = System.Text.Json.JsonSerializer.Deserialize<StatusResponse>(
@@ -396,6 +445,7 @@ public sealed class ControlSurfaceCompatibilityTests
             Status(
                 ControlSurfaceCompatibility.MinimumServerRevision,
                 "active_battle_strategy_adoption",
+                "active_run_metrics_v1",
                 "advisory_preflight_decisions",
                 "better_control_model_v2",
                 "bluestacks_maintenance_v1",

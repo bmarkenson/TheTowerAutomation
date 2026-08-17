@@ -106,9 +106,10 @@ DEFAULT_STALE_AFTER_SECONDS = 180
 EMULATOR_DEGRADATION_CACHE_SECONDS = 60.0
 # Advance this when a newer Windows client must reload the resident service,
 # and advance that client's MinimumServerRevision in the same change.
-CONTROL_SURFACE_REVISION = 46
+CONTROL_SURFACE_REVISION = 47
 CONTROL_SURFACE_CAPABILITIES = (
     "active_battle_strategy_adoption",
+    "active_run_metrics_v1",
     "advisory_preflight_decisions",
     "better_control_model_v1",
     "better_control_model_v2",
@@ -5882,6 +5883,7 @@ class ControlSurfaceService:
         runtime_lifecycle: Mapping[str, Any] = {}
         runtime_strategy_scope: Mapping[str, Any] = {}
         runtime_catastrophic_pause_hold: Mapping[str, Any] = {}
+        active_run_metrics: Optional[dict[str, Any]] = None
         runtime_startup_gate_policy: Optional[str] = None
         runtime_model = runtime_authority.get("control_model")
         if isinstance(runtime_model, Mapping):
@@ -5904,6 +5906,10 @@ class ControlSurfaceService:
             )
             if isinstance(raw_catastrophic_hold, Mapping):
                 runtime_catastrophic_pause_hold = raw_catastrophic_hold
+            active_run_metrics = _normalize_active_run_metric_status(
+                runtime_model.get("active_run_metrics"),
+                now=now,
+            )
         observation_age_seconds: Optional[int] = None
         if runtime_observation is not None:
             observed_at = _parse_timestamp(runtime_observation.get("observed_at"))
@@ -5952,6 +5958,19 @@ class ControlSurfaceService:
                     )
                 ),
             }
+        if not (
+            evidence is not None
+            and runtime_authority.get("owner_matches_exact_runtime") is True
+            and runtime_authority.get("active_battle") is True
+            and observation.get("game_state") == "active_battle"
+            and active_run_metrics is not None
+            and active_run_metrics.get(
+                "active_round_identity_fingerprint"
+            )
+            == observation.get("active_round_identity_fingerprint")
+            == runtime_authority.get("runtime_battle_identity")
+        ):
+            active_run_metrics = None
 
         workflow = validate_battle_workflow(control.get("battle_workflow"))
         manual = validate_manual_control(control.get("manual_control"))
@@ -6736,6 +6755,7 @@ class ControlSurfaceService:
                 ),
             },
             "observation": observation,
+            "active_run_metrics": active_run_metrics,
             "strategy_scope": {
                 "startup_default": startup_strategy,
                 "active_battle": active_strategy,
@@ -6899,6 +6919,100 @@ class ControlSurfaceService:
         except OSError as exc:
             return f"Control changed, but audit logging failed: {exc}"
         return None
+
+
+_ACTIVE_RUN_WHOLE_RATE_FIELDS = (
+    "coins_per_hour",
+    "cells_per_hour",
+    "waves_per_hour",
+    "effective_game_speed",
+)
+_ACTIVE_RUN_INTERVAL_RATE_FIELDS = ("coins_per_hour",)
+_ACTIVE_RUN_RATE_RE = re.compile(r"(?:0|[1-9][0-9]*)(?:\.[0-9]+)?")
+
+
+def _normalize_active_run_metric_status(
+    value: object,
+    *,
+    now: float,
+) -> Optional[dict[str, Any]]:
+    """Validate the bounded runtime projection and add server-derived age."""
+
+    if not isinstance(value, Mapping) or value.get("schema_version") != 1:
+        return None
+    captured_at = str(value.get("captured_at") or "").strip()
+    captured = _parse_timestamp(captured_at)
+    if captured is None:
+        return None
+    status = str(value.get("status") or "").strip().lower()
+    if status not in {"observed", "partial", "unavailable", "conflict"}:
+        return None
+    active_round_identity = _valid_battle_identity_fingerprint(
+        value.get("active_round_identity_fingerprint")
+    )
+    if active_round_identity is None:
+        return None
+
+    def rates(
+        candidate: object,
+        fields: tuple[str, ...],
+    ) -> Optional[dict[str, str]]:
+        if not isinstance(candidate, Mapping):
+            return None
+        normalized: dict[str, str] = {}
+        for field in fields:
+            metric = str(candidate.get(field) or "").strip()
+            if (
+                metric
+                and len(metric) <= 96
+                and _ACTIVE_RUN_RATE_RE.fullmatch(metric)
+            ):
+                normalized[field] = metric
+        return normalized or None
+
+    whole_run = (
+        rates(value.get("whole_run"), _ACTIVE_RUN_WHOLE_RATE_FIELDS)
+        if status in {"observed", "partial"}
+        else None
+    )
+    interval = (
+        rates(value.get("interval"), _ACTIVE_RUN_INTERVAL_RATE_FIELDS)
+        if status in {"observed", "partial"}
+        else None
+    )
+    if status == "observed" and whole_run is None and interval is None:
+        return None
+    raw_wave = value.get("checkpoint_wave")
+    checkpoint_wave = (
+        raw_wave
+        if isinstance(raw_wave, int)
+        and not isinstance(raw_wave, bool)
+        and 0 <= raw_wave <= 2_147_483_647
+        else None
+    )
+    raw_revision = value.get("save_revision")
+    save_revision = (
+        raw_revision
+        if isinstance(raw_revision, int)
+        and not isinstance(raw_revision, bool)
+        and 0 <= raw_revision <= 2_147_483_647
+        else None
+    )
+    return {
+        "schema_version": 1,
+        "status": status,
+        "reason": " ".join(str(value.get("reason") or "").split())[:256],
+        "active_round_identity_fingerprint": active_round_identity,
+        "captured_at": captured_at,
+        "age_seconds": min(
+            2_147_483_647,
+            max(0, int(float(now) - captured.timestamp())),
+        ),
+        "save_revision": save_revision,
+        "checkpoint_wave": checkpoint_wave,
+        "whole_run": whole_run,
+        "interval": interval,
+    }
 
 
 def _save_mapping_integration_error_status(code: str) -> int:

@@ -319,6 +319,8 @@ def _publish_runtime_acknowledgements(
     acknowledgements: dict[str, object],
     runtime_active: bool = True,
     strategy_scope: dict[str, object] | None = None,
+    active_run_metrics: dict[str, object] | None = None,
+    observation_identity: str | None = None,
     holds: tuple[AuthorityHoldState, ...] = (),
 ) -> None:
     authority = RuntimeActionAuthority()
@@ -326,6 +328,7 @@ def _publish_runtime_acknowledgements(
         global_pause=False,
         active_battle=True,
         battle_scope="ack-scope",
+        battle_identity=observation_identity,
         primary_state="RUNNING",
         holds=holds,
     )
@@ -334,33 +337,40 @@ def _publish_runtime_acknowledgements(
         owner=owner,
         stale_after_seconds=30,
     )
+    control_model: dict[str, object] = {
+        "schema_version": 1,
+        "observation": {
+            "schema_version": 1,
+            "observation_id": f"{owner['runtime_id']}:1",
+            "observed_at": now.isoformat(timespec="seconds"),
+            "primary_state": "RUNNING",
+            "home_battle_control": "UNKNOWN",
+            "game_state": "active_battle",
+            "active_battle": True,
+            "activity_scope_run_id": "ack-scope",
+            "target_generation": owner.get("target_generation"),
+        },
+        "battle_lifecycle": {"active_battle_adopted": True},
+        "strategy_scope": strategy_scope
+        or {
+            "startup_default": "farm_t18",
+            "active_battle": "farm_t18",
+            "pending_next_boundary": None,
+            "pending_active_battle": None,
+        },
+    }
+    if active_run_metrics is not None:
+        control_model["active_run_metrics"] = active_run_metrics
+    if observation_identity is not None:
+        observation = control_model["observation"]
+        assert isinstance(observation, dict)
+        observation["active_round_identity_fingerprint"] = observation_identity
     assert publisher.publish(
         authority.snapshot(now=now.timestamp()),
         runtime_active=runtime_active,
         now=now.timestamp(),
         acknowledgements=acknowledgements,
-        control_model={
-            "schema_version": 1,
-            "observation": {
-                "schema_version": 1,
-                "observation_id": f"{owner['runtime_id']}:1",
-                "observed_at": now.isoformat(timespec="seconds"),
-                "primary_state": "RUNNING",
-                "home_battle_control": "UNKNOWN",
-                "game_state": "active_battle",
-                "active_battle": True,
-                "activity_scope_run_id": "ack-scope",
-                "target_generation": owner.get("target_generation"),
-            },
-            "battle_lifecycle": {"active_battle_adopted": True},
-            "strategy_scope": strategy_scope
-            or {
-                "startup_default": "farm_t18",
-                "active_battle": "farm_t18",
-                "pending_next_boundary": None,
-                "pending_active_battle": None,
-            },
-        },
+        control_model=control_model,
     )
 
 
@@ -763,6 +773,181 @@ def test_runtime_acknowledgements_survive_more_than_tail_window_of_log_output(
         "observation_only": False,
         "degradation": None,
     }
+
+
+def test_status_exposes_only_fresh_exact_runtime_live_metrics(tmp_path):
+    now = datetime.now().astimezone().replace(microsecond=0)
+    captured_at = (now - timedelta(seconds=75)).isoformat(timespec="seconds")
+    control = _control_with_all_request_identities(tmp_path)
+    acknowledgements = _directive_acknowledgements(
+        control,
+        acknowledged_at=now.isoformat(timespec="seconds"),
+    )
+    owner = {
+        "runtime_id": "runtime-live-metrics",
+        "pid": os.getpid(),
+        "adb_target": "localhost:5555",
+        "target_generation": 13,
+    }
+    lock_handle = _fresh_exact_runtime_lock(
+        tmp_path,
+        runtime_id="runtime-live-metrics",
+        target_generation=13,
+    )
+    _publish_runtime_acknowledgements(
+        tmp_path,
+        now=now,
+        owner=owner,
+        acknowledgements=acknowledgements,
+        observation_identity=ACTIVE_BATTLE_IDENTITY,
+        active_run_metrics={
+            "schema_version": 1,
+            "status": "partial",
+            "reason": "  one_or_more_metric_claims_unavailable  ",
+            "active_round_identity_fingerprint": ACTIVE_BATTLE_IDENTITY,
+            "captured_at": captured_at,
+            "save_revision": 321,
+            "checkpoint_wave": 4321,
+            "whole_run": {
+                "coins_per_hour": "1780000000000000000",
+                "cells_per_hour": "590000",
+                "cash_per_hour": "invalid",
+                "waves_per_hour": "1250.5",
+                "effective_game_speed": "4.984",
+                "real_time_seconds": "3600",
+            },
+            "interval": {
+                "coins_per_hour": "1810000000000000000",
+                "cells_per_hour": "610000",
+            },
+        },
+    )
+    service = _service(tmp_path)
+    try:
+        fresh = service.status(now=now.timestamp())
+        stale = service.status(now=(now + timedelta(seconds=31)).timestamp())
+    finally:
+        lock_handle.close()
+
+    assert fresh["control_model"]["active_run_metrics"] == {
+        "schema_version": 1,
+        "status": "partial",
+        "reason": "one_or_more_metric_claims_unavailable",
+        "active_round_identity_fingerprint": ACTIVE_BATTLE_IDENTITY,
+        "captured_at": captured_at,
+        "age_seconds": 75,
+        "save_revision": 321,
+        "checkpoint_wave": 4321,
+        "whole_run": {
+            "coins_per_hour": "1780000000000000000",
+            "cells_per_hour": "590000",
+            "waves_per_hour": "1250.5",
+            "effective_game_speed": "4.984",
+        },
+        "interval": {
+            "coins_per_hour": "1810000000000000000",
+        },
+    }
+    assert stale["control_model"]["active_run_metrics"] is None
+
+
+def test_status_clears_rates_from_a_conflicted_live_checkpoint(tmp_path):
+    now = datetime.now().astimezone().replace(microsecond=0)
+    control = _control_with_all_request_identities(tmp_path)
+    acknowledgements = _directive_acknowledgements(
+        control,
+        acknowledged_at=now.isoformat(timespec="seconds"),
+    )
+    owner = {
+        "runtime_id": "runtime-conflicted-metrics",
+        "pid": os.getpid(),
+        "adb_target": "localhost:5555",
+        "target_generation": 14,
+    }
+    lock_handle = _fresh_exact_runtime_lock(
+        tmp_path,
+        runtime_id="runtime-conflicted-metrics",
+        target_generation=14,
+    )
+    _publish_runtime_acknowledgements(
+        tmp_path,
+        now=now,
+        owner=owner,
+        acknowledgements=acknowledgements,
+        observation_identity=ACTIVE_BATTLE_IDENTITY,
+        active_run_metrics={
+            "schema_version": 1,
+            "status": "conflict",
+            "reason": "real_time_seconds_regressed",
+            "active_round_identity_fingerprint": ACTIVE_BATTLE_IDENTITY,
+            "captured_at": now.isoformat(timespec="seconds"),
+            "save_revision": 322,
+            "checkpoint_wave": 4325,
+            "whole_run": {"coins_per_hour": "1780000000000000000"},
+            "interval": {"coins_per_hour": "1810000000000000000"},
+        },
+    )
+    try:
+        metrics = _service(tmp_path).status(now=now.timestamp())[
+            "control_model"
+        ]["active_run_metrics"]
+    finally:
+        lock_handle.close()
+
+    assert metrics["status"] == "conflict"
+    assert metrics["reason"] == "real_time_seconds_regressed"
+    assert metrics["whole_run"] is None
+    assert metrics["interval"] is None
+
+
+@pytest.mark.parametrize(
+    "metric_identity",
+    [None, "b" * 64],
+)
+def test_status_hides_live_metrics_not_bound_to_observed_round(
+    tmp_path,
+    metric_identity: str | None,
+):
+    now = datetime.now().astimezone().replace(microsecond=0)
+    control = _control_with_all_request_identities(tmp_path)
+    owner = {
+        "runtime_id": "runtime-mismatched-live-metrics",
+        "pid": os.getpid(),
+        "adb_target": "localhost:5555",
+        "target_generation": 15,
+    }
+    lock_handle = _fresh_exact_runtime_lock(
+        tmp_path,
+        runtime_id="runtime-mismatched-live-metrics",
+        target_generation=15,
+    )
+    active_run_metrics = {
+        "schema_version": 1,
+        "status": "observed",
+        "captured_at": now.isoformat(timespec="seconds"),
+        "whole_run": {"coins_per_hour": "1780000000000000000"},
+    }
+    if metric_identity is not None:
+        active_run_metrics["active_round_identity_fingerprint"] = metric_identity
+    _publish_runtime_acknowledgements(
+        tmp_path,
+        now=now,
+        owner=owner,
+        acknowledgements=_directive_acknowledgements(
+            control,
+            acknowledged_at=now.isoformat(timespec="seconds"),
+        ),
+        observation_identity=ACTIVE_BATTLE_IDENTITY,
+        active_run_metrics=active_run_metrics,
+    )
+    try:
+        metrics = _service(tmp_path).status(now=now.timestamp())[
+            "control_model"
+        ]["active_run_metrics"]
+    finally:
+        lock_handle.close()
+
+    assert metrics is None
 
 
 def test_runtime_acknowledgements_survive_action_log_rotation(tmp_path):
@@ -3934,7 +4119,9 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert "When this battle ends" in html
     assert 'id="terminalPolicyStatus"' in html
     assert "RetryModeButton" not in native_xaml
-    assert "MinimumServerRevision = 46" in native_compatibility
+    assert "MinimumServerRevision = 47" in native_compatibility
+    assert '"active_run_metrics_v1"' in native_compatibility
+    assert "active_run_metrics_v1" in CONTROL_SURFACE_CAPABILITIES
     assert '"emulator_host_selection_v1"' in native_compatibility
     assert "emulator_host_selection_v1" in CONTROL_SURFACE_CAPABILITIES
     assert 'x:Name="UseThisEmulatorButton"' in native_xaml
@@ -4283,6 +4470,9 @@ def test_native_status_uses_only_published_dashboard_metrics():
     native_models = (native_root / "Models.cs").read_text(
         encoding="utf-8"
     )
+    native_presenter = (native_root / "ActiveRunMetricPresenter.cs").read_text(
+        encoding="utf-8"
+    )
 
     assert 'JsonPropertyName("server_time")' in native_models
     assert 'JsonPropertyName("current_run")' in native_models
@@ -4298,6 +4488,27 @@ def test_native_status_uses_only_published_dashboard_metrics():
     assert "status.ServerTime" in native_code
     assert "RunElapsedMetricPanel.Visibility = processActive" in native_code
     assert 'GameState: "active_battle"' in native_code
+    assert 'JsonPropertyName("active_run_metrics")' in native_models
+    assert 'JsonPropertyName("whole_run")' in native_models
+    assert 'JsonPropertyName("interval")' in native_models
+    for field in (
+        "WholeRunCphMetricPanel",
+        "IntervalCphMetricPanel",
+        "CellsHourMetricPanel",
+        "WavesHourMetricPanel",
+        "EffectiveSpeedMetricPanel",
+        "MetricCheckpointPanel",
+    ):
+        assert f'x:Name="{field}"' in native_xaml
+    assert "ActiveRunMetricPresenter.Present(" in native_code
+    assert "RenderActiveRunMetrics(" in native_code
+    assert native_code.count("ClearActiveRunMetrics();") >= 3
+    assert "observedRoundIdentity" in native_code
+    assert "metrics.ActiveRoundIdentityFingerprint" in native_presenter
+    assert "metrics.AgeSeconds" in native_presenter
+    assert "metrics.CheckpointWave" in native_presenter
+    assert "metrics.SaveRevision" in native_presenter
+    assert 'status is "observed" or "partial"' in native_presenter
 
     for unsupported_field in (
         "ExpectedRunDurationText",

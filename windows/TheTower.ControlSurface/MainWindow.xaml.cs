@@ -2604,6 +2604,7 @@ public partial class MainWindow : Window
             && _controlSurfaceServiceState is { IsActive: false } serviceState
             && serviceState.ActiveState is "inactive" or "failed")
         {
+            ClearActiveRunMetrics();
             SetHttpConnectionStatus(
                 serviceState.ActiveState == "failed"
                     ? "Unavailable — service failed"
@@ -2648,6 +2649,7 @@ public partial class MainWindow : Window
         }
         catch (OperationCanceledException)
         {
+            ClearActiveRunMetrics();
             if (!force)
             {
                 SetHttpConnectionStatus(
@@ -2657,6 +2659,7 @@ public partial class MainWindow : Window
         }
         catch (Exception exc)
         {
+            ClearActiveRunMetrics();
             var serviceStopped = _controlSurfaceServiceState is
                 { IsActive: false, ActiveState: "inactive" };
             SetHttpConnectionStatus(
@@ -3238,9 +3241,13 @@ public partial class MainWindow : Window
         ProcessPidText.Text = processPid?.ToString(CultureInfo.InvariantCulture) ?? "-";
         var lifecycleAvailable = service?.Available == true;
         var processActive = service?.Active == true || status.Runtime.Active;
+        var controlObservation = status.ControlModel?.Observation;
+        var structuredBattleObservationActive = controlObservation is
+            { Available: true, GameState: "active_battle" };
+        var observedRoundIdentity =
+            controlObservation?.ActiveRoundIdentityFingerprint;
         var battleObservationActive = status.Observation is { Stale: false }
-            && (status.ControlModel?.Observation is
-                    { Available: true, GameState: "active_battle" }
+            && (structuredBattleObservationActive
                 || (status.ControlModel is null
                     && string.Equals(
                         status.Observation.StateLabel,
@@ -3256,6 +3263,11 @@ public partial class MainWindow : Window
             && !string.IsNullOrWhiteSpace(status.Observation?.CoinsPerMinute)
                 ? Visibility.Visible
                 : Visibility.Collapsed;
+        RenderActiveRunMetrics(
+            ActiveRunMetricPresenter.Present(
+                status.ControlModel?.ActiveRunMetrics,
+                observedRoundIdentity,
+                processActive && structuredBattleObservationActive));
         var runElapsed = FormatRunElapsed(
             status.CurrentRun,
             status.ServerTime);
@@ -5208,6 +5220,43 @@ public partial class MainWindow : Window
             int.MaxValue);
         return FormatAge(seconds);
     }
+
+    private void RenderActiveRunMetrics(
+        ActiveRunMetricPresentation presentation)
+    {
+        WholeRunCphText.Text = presentation.WholeRunCph ?? "";
+        WholeRunCphMetricPanel.Visibility = presentation.WholeRunCph is null
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        IntervalCphText.Text = presentation.IntervalCph ?? "";
+        IntervalCphMetricPanel.Visibility = presentation.IntervalCph is null
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        CellsHourText.Text = presentation.CellsPerHour ?? "";
+        CellsHourMetricPanel.Visibility = presentation.CellsPerHour is null
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        WavesHourText.Text = presentation.WavesPerHour ?? "";
+        WavesHourMetricPanel.Visibility = presentation.WavesPerHour is null
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        EffectiveSpeedText.Text = presentation.EffectiveSpeed ?? "";
+        EffectiveSpeedMetricPanel.Visibility = presentation.EffectiveSpeed is null
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        MetricCheckpointText.Text = presentation.Checkpoint ?? "";
+        MetricCheckpointPanel.ToolTip = presentation.CheckpointDetail;
+        MetricCheckpointPanel.Visibility = presentation.Checkpoint is null
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+    }
+
+    private void ClearActiveRunMetrics() =>
+        RenderActiveRunMetrics(
+            ActiveRunMetricPresenter.Present(
+                null,
+                observedRoundIdentity: null,
+                activeBattleAvailable: false));
 
     private static string FormatPercent(double? value) =>
         value is null

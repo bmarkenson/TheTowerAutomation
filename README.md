@@ -252,6 +252,14 @@ so there is no separate per-run Coins CSV or scheduled lifetime-total display
 toggle. An attached replacement process records the portion of the battle it
 observes.
 
+The native Windows status also consumes the latest already-accepted passive
+save checkpoint without causing another acquisition. It keeps whole-run and
+interval realized CPH distinct from OCR Coins/min and shows whole-run
+cells/hour, waves/hour, effective speed, plus checkpoint provenance only while
+fresh exact runtime ownership and the same forced-save round identity still
+prove the active battle. A mismatched save source, identity transition, or
+lost status connection hides the live row instead of retaining old values.
+
 An unbound terminal, absent or UI-sourced baseline, unsupported version,
 unchanged or invalid tail transition, unknown death cause, changed shape, or
 identity contradiction preserves the existing More Stats fallback. That route

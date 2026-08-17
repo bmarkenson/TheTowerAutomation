@@ -844,6 +844,9 @@ public sealed class BetterControlModelStatus
     [JsonPropertyName("observation")]
     public BetterControlObservationStatus Observation { get; set; } = new();
 
+    [JsonPropertyName("active_run_metrics")]
+    public ActiveRunMetricStatus? ActiveRunMetrics { get; set; }
+
     [JsonPropertyName("strategy_scope")]
     public BetterControlStrategyScopeStatus StrategyScope { get; set; } = new();
 
@@ -861,6 +864,54 @@ public sealed class BetterControlModelStatus
 
     [JsonPropertyName("actions")]
     public Dictionary<string, BetterControlActionAvailability> Actions { get; set; } = [];
+}
+
+public sealed class ActiveRunMetricStatus
+{
+    [JsonPropertyName("schema_version")]
+    public int SchemaVersion { get; set; }
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "unavailable";
+
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = "";
+
+    [JsonPropertyName("active_round_identity_fingerprint")]
+    public string? ActiveRoundIdentityFingerprint { get; set; }
+
+    [JsonPropertyName("captured_at")]
+    public string? CapturedAt { get; set; }
+
+    [JsonPropertyName("age_seconds")]
+    public int? AgeSeconds { get; set; }
+
+    [JsonPropertyName("save_revision")]
+    public int? SaveRevision { get; set; }
+
+    [JsonPropertyName("checkpoint_wave")]
+    public int? CheckpointWave { get; set; }
+
+    [JsonPropertyName("whole_run")]
+    public ActiveRunRates? WholeRun { get; set; }
+
+    [JsonPropertyName("interval")]
+    public ActiveRunRates? Interval { get; set; }
+}
+
+public sealed class ActiveRunRates
+{
+    [JsonPropertyName("coins_per_hour")]
+    public string? CoinsPerHour { get; set; }
+
+    [JsonPropertyName("cells_per_hour")]
+    public string? CellsPerHour { get; set; }
+
+    [JsonPropertyName("waves_per_hour")]
+    public string? WavesPerHour { get; set; }
+
+    [JsonPropertyName("effective_game_speed")]
+    public string? EffectiveGameSpeed { get; set; }
 }
 
 public sealed class BetterControlProcessStatus
@@ -897,6 +948,9 @@ public sealed class BetterControlObservationStatus
 
     [JsonPropertyName("reason")]
     public string Reason { get; set; } = "";
+
+    [JsonPropertyName("active_round_identity_fingerprint")]
+    public string? ActiveRoundIdentityFingerprint { get; set; }
 }
 
 public sealed class BetterControlStrategyScopeStatus

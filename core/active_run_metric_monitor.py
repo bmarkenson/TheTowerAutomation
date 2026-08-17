@@ -189,6 +189,7 @@ class ActiveRunMetricMonitor:
             "captured_at": sample["captured_at"],
             "save_revision": sample["save_revision"],
             "saved_wave": sample["saved_wave"],
+            "source_fingerprint": sample["source_fingerprint"],
             "whole_run": copy.deepcopy(
                 economy_sample.get("whole_run") if economy_sample else None
             ),

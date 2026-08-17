@@ -1389,7 +1389,20 @@ Process request examples:
   activity-scope start and the atomic server timestamp. Wave and Coins/min are
   absent outside a fresh active-battle observation instead of presenting stale
   values or placeholder dashes. This elapsed value is presentation only and
-  never establishes battle identity or authority. Expected duration, active Peak Coins/min,
+  never establishes battle identity or authority. Server revision 47 and
+  `active_run_metrics_v1` add the latest accepted save-backed checkpoint to the
+  same runtime-owned snapshot. The native status row shows whole-run realized
+  CPH, compatible-checkpoint interval CPH, whole-run cells/hour, waves/hour,
+  effective speed, and the checkpoint wave, server-derived age, and semantic
+  status. It never converts OCR Coins/min into CPH. Polling reads only the
+  existing `ActiveRunMetricMonitor` projection; it performs no save acquisition
+  or forced write and does not change the independent passive cadence. The
+  runtime projection, authority snapshot, and structured observation must all
+  carry the same forced-save active-round identity, and every displayed rate
+  must belong to the newest single-source checkpoint. The server clears the
+  projection outside that fresh exact-owner boundary; the native client also
+  clears it on a failed status poll. Partial or conflicted checkpoints omit
+  rates they do not currently prove. Expected duration, active Peak Coins/min,
   expected-versus-observed requirement detail, recovery countdowns, and
   Return/Extend/Cancel recovery actions remain absent until their owning
   runtime status fields and guarded directives exist.
@@ -1402,7 +1415,8 @@ Process request examples:
   pending/acknowledged/rejected/interrupted state comes from Linux, not local
   GUI inference. Start Automation always leaves actions Paused. This contract
   was introduced in server revision 30; the current client requires revision
-  41 plus `better_control_model_v2`, `runtime_control_acknowledgements_v1`,
+  47 plus `active_run_metrics_v1`, `better_control_model_v2`,
+  `runtime_control_acknowledgements_v1`,
   `strategy_aware_attach_v1`,
   `bluestacks_maintenance_v2`, `bluestacks_operator_restart_v1`, and
   `bluestacks_listener_lifetime_telemetry_v1`;

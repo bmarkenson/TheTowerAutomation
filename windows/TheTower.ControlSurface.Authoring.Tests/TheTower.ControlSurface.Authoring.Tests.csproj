@@ -17,6 +17,8 @@
   <ItemGroup>
     <Compile Include="..\TheTower.ControlSurface\ApiClient.cs"
              Link="ApiClient.cs" />
+    <Compile Include="..\TheTower.ControlSurface\ActiveRunMetricPresenter.cs"
+             Link="ActiveRunMetricPresenter.cs" />
     <Compile Include="..\TheTower.ControlSurface\BlueStacksInstanceController.cs"
              Link="BlueStacksInstanceController.cs" />
     <Compile Include="..\TheTower.ControlSurface\BlueStacksMaintenanceCoordinator.cs"

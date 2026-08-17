@@ -59,11 +59,12 @@ internal static class ControlSurfaceCompatibility
     public const int RequiredApiVersion = 1;
     // Advance this when the client depends on the matching newer Linux
     // CONTROL_SURFACE_REVISION; older clients may retain a lower minimum.
-    public const int MinimumServerRevision = 46;
+    public const int MinimumServerRevision = 47;
 
     private static readonly string[] RequiredCapabilities =
     [
         "active_battle_strategy_adoption",
+        "active_run_metrics_v1",
         "advisory_preflight_decisions",
         "better_control_model_v2",
         "completed_battle_discard",

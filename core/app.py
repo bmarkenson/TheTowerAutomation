@@ -291,6 +291,13 @@ BATTLE_ACTION_DISPATCH_TIMEOUT_SECONDS = 20.0
 MAX_FORCED_BATTLE_IDENTITY_ATTEMPTS = 2
 FORCED_BATTLE_IDENTITY_RETRY_COOLDOWN_SECONDS = 30.0
 MAX_EMULATOR_LOCATION_ENTRIES = 64
+_LIVE_RUN_WHOLE_RATE_FIELDS = (
+    "coins_per_hour",
+    "cells_per_hour",
+    "waves_per_hour",
+    "effective_game_speed",
+)
+_LIVE_RUN_INTERVAL_RATE_FIELDS = ("coins_per_hour",)
 _BATTLE_SCOPE_UNSET = object()
 _REPORT_SCOPE_UNAVAILABLE = "report-scope-unavailable"
 _GENERIC_SESSION_PREFLIGHT_REASONS = frozenset(
@@ -3297,6 +3304,7 @@ class App:
                 "active_run_performance": (
                     self._active_run_performance_evidence(current_strategy)
                 ),
+                "active_run_metrics": self._active_run_metric_status(),
                 "battle_lifecycle": {
                     "awaiting_initial_intent": bool(
                         awaiting_intent()
@@ -3398,6 +3406,126 @@ class App:
                 ),
                 "configuration_fingerprint": hashlib.sha256(encoded).hexdigest(),
                 "tier": run_configuration.get("tier"),
+            }
+        except (TypeError, ValueError):
+            return None
+
+    def _active_run_metric_status(self) -> Optional[dict[str, Any]]:
+        """Publish the latest passive save checkpoint for operator display."""
+
+        monitor = getattr(self, "_active_run_metric_monitor", None)
+        if monitor is None:
+            return None
+        context = self._current_player_save_observation_context()
+        if context is None:
+            return None
+        observation = getattr(self, "_control_observation", None)
+        if not (
+            isinstance(observation, Mapping)
+            and observation.get("active_battle") is True
+            and observation.get("game_state") == "active_battle"
+            and observation.get("active_round_identity_fingerprint")
+            == context.active_round_identity_fingerprint
+        ):
+            return None
+        try:
+            with self._perk_save_monitor_guard():
+                summary = monitor.latest_summary(context)
+            if not isinstance(summary, Mapping):
+                return None
+            components = summary.get("components")
+            economy = (
+                components.get("economy")
+                if isinstance(components, Mapping)
+                else None
+            )
+            if not isinstance(economy, Mapping):
+                return None
+            latest = economy.get("latest")
+            checkpoint_fields = (
+                "captured_at",
+                "save_revision",
+                "saved_wave",
+            )
+            matching_sources = {
+                component_latest.get("source_fingerprint")
+                for component in components.values()
+                if isinstance(component, Mapping)
+                and isinstance(
+                    (component_latest := component.get("latest")),
+                    Mapping,
+                )
+                and all(
+                    component_latest.get(field) == summary.get(field)
+                    for field in checkpoint_fields
+                )
+                and isinstance(
+                    component_latest.get("source_fingerprint"),
+                    str,
+                )
+            }
+            latest_is_current = bool(
+                isinstance(latest, Mapping)
+                and latest.get("captured_at") == summary.get("captured_at")
+                and latest.get("save_revision") == summary.get("save_revision")
+                and latest.get("saved_wave") == summary.get("saved_wave")
+                and latest.get("source_fingerprint")
+                == summary.get("source_fingerprint")
+                and matching_sources == {summary.get("source_fingerprint")}
+            )
+            status = str(economy.get("status") or "unavailable").lower()
+            reason = str(economy.get("reason") or "")
+            if status in {"observed", "partial"} and latest_is_current:
+                whole_run = latest.get("whole_run")
+                interval = latest.get("interval")
+            else:
+                whole_run = None
+                interval = None
+                if status == "observed":
+                    status = "partial"
+                    reason = "latest_economy_checkpoint_not_current"
+
+            def rates(
+                value: object,
+                fields: tuple[str, ...],
+            ) -> Optional[dict[str, str]]:
+                if not isinstance(value, Mapping):
+                    return None
+                projected = {
+                    field: metric
+                    for field in fields
+                    if isinstance((metric := value.get(field)), str)
+                    and metric
+                }
+                return projected or None
+
+            whole_run_rates = rates(
+                whole_run,
+                _LIVE_RUN_WHOLE_RATE_FIELDS,
+            )
+            interval_rates = rates(
+                interval,
+                _LIVE_RUN_INTERVAL_RATE_FIELDS,
+            )
+            if (
+                status == "observed"
+                and whole_run_rates is None
+                and interval_rates is None
+            ):
+                status = "partial"
+                reason = "live_rates_unavailable_at_checkpoint"
+            return {
+                "schema_version": 1,
+                "status": status,
+                "reason": reason,
+                "active_round_identity_fingerprint": (
+                    context.active_round_identity_fingerprint
+                ),
+                "captured_at": summary.get("captured_at"),
+                "save_revision": summary.get("save_revision"),
+                "checkpoint_wave": summary.get("saved_wave"),
+                "whole_run": whole_run_rates,
+                "interval": interval_rates,
             }
         except (TypeError, ValueError):
             return None

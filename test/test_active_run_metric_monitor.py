@@ -850,6 +850,7 @@ def test_tracks_whole_run_and_interval_rates_then_reconciles_terminal():
     summary = monitor.latest_summary(_context())
     assert summary is not None
     assert summary["saved_wave"] == 200
+    assert summary["source_fingerprint"] == second.capture["source_sha256"]
     assert summary["whole_run"] == {
         "real_time_seconds": "200",
         "game_time_seconds": "1000",

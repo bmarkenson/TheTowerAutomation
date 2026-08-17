@@ -442,6 +442,184 @@ def test_app_fans_one_passive_bundle_to_perks_metrics_and_optional_audit():
     )
 
 
+def test_app_projects_only_the_current_economy_checkpoint_for_live_status():
+    app = App.__new__(App)
+    context = _context()
+    monitor = Mock()
+    monitor.latest_summary.return_value = {
+        "captured_at": "2026-08-17T20:00:00+00:00",
+        "save_revision": 120,
+        "saved_wave": 2400,
+        "source_fingerprint": "b" * 64,
+        "whole_run": {"coins_per_hour": "stale-top-level-value"},
+        "interval": None,
+        "components": {
+            "economy": {
+                "status": "partial",
+                "reason": "one_or_more_metric_claims_unavailable",
+                "latest": {
+                    "captured_at": "2026-08-17T20:00:00+00:00",
+                    "save_revision": 120,
+                    "saved_wave": 2400,
+                    "source_fingerprint": "b" * 64,
+                    "whole_run": {
+                        "coins_per_hour": "1230000000000000",
+                        "cells_per_hour": "4567.5",
+                        "cash_per_hour": "8900",
+                        "real_time_seconds": "3600",
+                    },
+                    "interval": {
+                        "coins_per_hour": "1300000000000000",
+                        "cells_per_hour": "5000",
+                    },
+                },
+            },
+        },
+    }
+    app._active_run_metric_monitor = monitor
+    app._current_player_save_observation_context = Mock(return_value=context)
+    app._control_observation = {
+        "active_battle": True,
+        "game_state": "active_battle",
+        "active_round_identity_fingerprint": (
+            context.active_round_identity_fingerprint
+        ),
+    }
+
+    assert app._active_run_metric_status() == {
+        "schema_version": 1,
+        "status": "partial",
+        "reason": "one_or_more_metric_claims_unavailable",
+        "active_round_identity_fingerprint": "a" * 64,
+        "captured_at": "2026-08-17T20:00:00+00:00",
+        "save_revision": 120,
+        "checkpoint_wave": 2400,
+        "whole_run": {
+            "coins_per_hour": "1230000000000000",
+            "cells_per_hour": "4567.5",
+        },
+        "interval": {"coins_per_hour": "1300000000000000"},
+    }
+    monitor.latest_summary.assert_called_once_with(context)
+    assert monitor.method_calls == [call.latest_summary(context)]
+
+
+def test_app_clears_rates_when_newest_checkpoint_sources_are_ambiguous():
+    app = App.__new__(App)
+    context = _context()
+    monitor = Mock()
+    monitor.latest_summary.return_value = {
+        "captured_at": "2026-08-17T20:00:00+00:00",
+        "save_revision": 121,
+        "saved_wave": 2500,
+        "source_fingerprint": "b" * 64,
+        "components": {
+            "economy": {
+                "status": "observed",
+                "reason": "",
+                "latest": {
+                    "captured_at": "2026-08-17T20:00:00+00:00",
+                    "save_revision": 121,
+                    "saved_wave": 2500,
+                    "source_fingerprint": "b" * 64,
+                    "whole_run": {"coins_per_hour": "1230000000000000"},
+                    "interval": {"coins_per_hour": "1300000000000000"},
+                },
+            },
+            "progress": {
+                "status": "observed",
+                "reason": "",
+                "latest": {
+                    "captured_at": "2026-08-17T20:00:00+00:00",
+                    "save_revision": 121,
+                    "saved_wave": 2500,
+                    "source_fingerprint": "c" * 64,
+                },
+            },
+        },
+    }
+    app._active_run_metric_monitor = monitor
+    app._current_player_save_observation_context = Mock(return_value=context)
+    app._control_observation = {
+        "active_battle": True,
+        "game_state": "active_battle",
+        "active_round_identity_fingerprint": (
+            context.active_round_identity_fingerprint
+        ),
+    }
+
+    projection = app._active_run_metric_status()
+
+    assert projection is not None
+    assert projection["status"] == "partial"
+    assert projection["reason"] == "latest_economy_checkpoint_not_current"
+    assert projection["whole_run"] is None
+    assert projection["interval"] is None
+
+
+@pytest.mark.parametrize("observed_identity", [None, "b" * 64])
+def test_app_hides_live_metrics_without_the_exact_observed_round(
+    observed_identity: str | None,
+):
+    app = App.__new__(App)
+    context = _context()
+    monitor = Mock()
+    app._active_run_metric_monitor = monitor
+    app._current_player_save_observation_context = Mock(return_value=context)
+    app._control_observation = {
+        "active_battle": True,
+        "game_state": "active_battle",
+        "active_round_identity_fingerprint": observed_identity,
+    }
+
+    assert app._active_run_metric_status() is None
+    monitor.latest_summary.assert_not_called()
+
+
+def test_app_marks_a_current_checkpoint_partial_until_rates_are_available():
+    app = App.__new__(App)
+    context = _context()
+    checkpoint = {
+        "captured_at": "2026-08-17T20:00:00+00:00",
+        "save_revision": 1,
+        "saved_wave": 0,
+        "source_fingerprint": "b" * 64,
+    }
+    monitor = Mock()
+    monitor.latest_summary.return_value = {
+        **checkpoint,
+        "components": {
+            "economy": {
+                "status": "observed",
+                "reason": "",
+                "latest": {
+                    **checkpoint,
+                    "whole_run": None,
+                    "interval": None,
+                },
+            },
+        },
+    }
+    app._active_run_metric_monitor = monitor
+    app._current_player_save_observation_context = Mock(return_value=context)
+    app._control_observation = {
+        "active_battle": True,
+        "game_state": "active_battle",
+        "active_round_identity_fingerprint": (
+            context.active_round_identity_fingerprint
+        ),
+    }
+
+    projection = app._active_run_metric_status()
+
+    assert projection is not None
+    assert projection["status"] == "partial"
+    assert projection["reason"] == "live_rates_unavailable_at_checkpoint"
+    assert projection["checkpoint_wave"] == 0
+    assert projection["whole_run"] is None
+    assert projection["interval"] is None
+
+
 def test_app_binds_activation_tracker_without_optional_save_monitors():
     app = App.__new__(App)
     context = _context()

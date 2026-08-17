@@ -300,10 +300,20 @@ The status band shows run elapsed only when a managed process and a valid
 current activity scope are both present. It calculates that value from the
 scope's published start and the same response's Linux server timestamp, not
 from Activity prose or the Windows clock. Wave and Coins/min disappear outside
-a fresh active-battle observation. No expected duration, Peak Coins/min,
-requirement comparison, recovery countdown, or Return/Extend/Cancel recovery
-control is synthesized before a versioned status field and guarded runtime
-directive own it.
+a fresh active-battle observation. During a fresh exact-owner active battle, a
+second row shows the latest accepted save checkpoint's whole-run realized CPH,
+compatible-checkpoint interval CPH, whole-run cells/hour, waves/hour, and
+effective speed, followed by checkpoint wave, Linux-server-derived age, and
+semantic status. These fields reuse passive `ActiveRunMetricMonitor` state;
+status polling never acquires or forces a save and never turns OCR Coins/min
+into realized CPH. The metric projection, authority snapshot, and structured
+observation must carry the same forced-save round identity, and its rates must
+come from one newest save source. An identity or source mismatch, process or
+authority loss, or failed status poll clears the row. A partial or conflicted
+checkpoint clears each unproved rate instead of retaining its older value. No
+expected duration, Peak Coins/min, requirement comparison, recovery countdown,
+or Return/Extend/Cancel recovery control is synthesized before a versioned
+status field and guarded runtime directive own it.
 
 The application header keeps four different health signals visible: the fixed
 Linux API service's systemd state, HTTP reachability, the Windows-local API SSH
@@ -1092,8 +1102,9 @@ supported capabilities. The Windows build carries an expected API version, a
 minimum server revision, and required capabilities. Any mismatch produces a
 prominent full-width **Linux API update required** banner, disables dependent
 actions, and gives disabled Start buttons the same blocker in a tooltip. The
-current Windows build requires revision 46, `current_battle_perks_v1`,
-`better_control_model_v2`, `runtime_control_acknowledgements_v1`,
+current Windows build requires revision 47, `active_run_metrics_v1`,
+`current_battle_perks_v1`, `better_control_model_v2`,
+`runtime_control_acknowledgements_v1`,
 `strategy_aware_attach_v1`,
 `emulator_host_selection_v1`,
 `save_backed_setup_capture_v2`, `save_mapping_staged_candidate_v1`,

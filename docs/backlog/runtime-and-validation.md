@@ -483,15 +483,6 @@ can change as operator use supplies better evidence.
      representative prior runs. Define the comparison cohort and exclude
      configuration repairs, surrendered runs, and other non-representative
      outcomes from the estimate.
-   - Publish the latest accepted save-backed active-run checkpoint through the
-     same atomic snapshot and display whole-run realized CPH plus interval CPH
-     when its baseline is valid. Include checkpoint wave, capture time/age, and
-     semantic status, and keep both values distinct from OCR Coins/min. Status
-     polling must reuse `ActiveRunMetricMonitor` state without acquiring or
-     forcing a save, changing the independent 300-second passive cadence, or
-     making Perk observations force writes. Identity changes and
-     partial/unavailable claims clear only these fields rather than displaying
-     stale values.
    - Resolve the stale-running top-bar defect tracked in
      [`ISSUE-2026-012`](../issues/open-2026.md#native-top-bar-retained-a-running-directive-after-automation-stopped).
 3. [ ] Extend concise human-readable requirement results to in-battle
