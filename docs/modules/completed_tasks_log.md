@@ -48,10 +48,14 @@ resolved dossier instead of copying its detail.
   battle-local state and completes the normal Attach. Pending restart handoffs
   transfer to that same forced-save path instead of competing with it. Tier and
   wave never serve as identity.
-- Exact candidate `0939e78` passed compilation, state definitions, clickmap
-  integrity with zero errors and the established 44 orphan notices, and all
-  3,018 repository tests in 446.45 seconds using development-environment
-  fingerprint
+- Initial candidate `0939e78` proved the same active-round ID during production
+  smoke, which exposed that Attach invalidated that evidence before accepting
+  its request. Exact fix-forward candidate `77fe39e` preserves the first ID
+  through Attach acceptance and re-arms only the required second forced save.
+  The three related control/recovery modules pass 322 tests; the corrected
+  candidate passed compilation, state definitions, clickmap integrity with zero
+  errors and the established 44 orphan notices, and all 3,020 repository tests
+  in 434.69 seconds using development-environment fingerprint
   `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
 
 ### 2026-08-16 Preserved Game Over lifecycle recovery

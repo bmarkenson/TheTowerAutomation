@@ -43,14 +43,17 @@ and actionable work lives in
   relation, and accepts a force-proven later battle instead of competing or
   Pausing. Legacy completed same-battle records without the relation field
   remain valid.
-- **Fix and regression:** Exact candidate `0939e78` adds Welcome Back owner,
-  fresh-process, same-ID, later-ID, handoff-transfer, persistence compatibility,
-  bounded-dispatch, and control-surface wait coverage in
-  `test/test_emulator_recovery.py`, `test/test_better_control_model.py`, and
-  `test/test_automation_process.py`. Related control/identity suites passed 499
-  tests. The committed candidate passed compilation, state definitions,
+- **Fix and regression:** Initial exact candidate `0939e78` added Welcome Back
+  owner, fresh-process, same-ID, later-ID, handoff-transfer, persistence
+  compatibility, bounded-dispatch, and control-surface wait coverage. Its first
+  production smoke force-proved the expected same active-round ID, then exposed
+  that the fresh-runtime Attach re-armed identity before its request could
+  acknowledge that exact evidence. Fix-forward candidate `77fe39e` retains the
+  first ID through `validating_save` acceptance and only then re-arms Attach's
+  second forced serialization. The three related control/recovery modules pass
+  322 tests. The corrected candidate passed compilation, state definitions,
   clickmap integrity with zero errors and the established 44 orphan notices,
-  and all 3,018 repository tests in 446.45 seconds using development-environment
+  and all 3,020 repository tests in 434.69 seconds using development-environment
   fingerprint
   `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
 
