@@ -858,10 +858,13 @@ guard while either urgent EHLS/EALS purchase remains incomplete; attachment
 and non-Farm profiles may correct speed as soon as their runtime policy grants
 handler action authority. The completed record stores the current target,
 target semantics, and per-battle target timeline separately from derived
-effective game speed. Each periodic status frame also reads the visible speed
-without sending input. That observation is published separately from the
-target and retained alongside the contemporaneous Coins/min sample. A direct
-manual change in the game is therefore observable drift, not a new directive:
+effective game speed. When a periodic status is due, the current main-loop
+frame reads visible speed without sending input. A miss defers that status
+through two later fresh main-loop frames; only three consecutive misses publish
+an unavailable reading. The bounded retries reuse normal captures, and the
+eventual observed speed remains paired with Coins/min from the frame actually
+published. That observation is separate from the target. A direct manual
+change in the game is therefore observable drift, not a new directive:
 the periodic guard restores the selected target. Selecting a new target in the
 control surface re-arms the guard immediately and records its approximate wave
 in the target timeline.

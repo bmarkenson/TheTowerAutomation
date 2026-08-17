@@ -254,8 +254,9 @@ observes.
 
 The native Windows status also consumes the latest already-accepted passive
 save checkpoint without causing another acquisition. It keeps whole-run and
-interval realized CPH distinct from OCR Coins/min and shows whole-run
-cells/hour, waves/hour, effective speed, plus checkpoint provenance only while
+recent realized CPH—the latest compatible save-to-save interval—distinct from
+OCR Coins/min and shows whole-run cells/hour, waves/hour, effective speed, plus
+checkpoint provenance only while
 fresh exact runtime ownership and the same forced-save round identity still
 prove the active battle. A mismatched save source, identity transition, or
 lost status connection hides the live row instead of retaining old values.

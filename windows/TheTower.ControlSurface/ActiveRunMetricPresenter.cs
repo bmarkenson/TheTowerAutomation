@@ -82,13 +82,16 @@ internal static class ActiveRunMetricPresenter
         if (metrics.CheckpointWave is >= 0)
         {
             checkpointParts.Add(
-                $"Wave {metrics.CheckpointWave.Value.ToString("N0", CultureInfo.InvariantCulture)}");
+                $"W{metrics.CheckpointWave.Value.ToString("N0", CultureInfo.InvariantCulture)}");
         }
         if (age is not null)
         {
             checkpointParts.Add($"{age} ago");
         }
-        checkpointParts.Add(statusLabel);
+        if (status != "observed")
+        {
+            checkpointParts.Add(statusLabel);
+        }
 
         var detailParts = new List<string>
         {

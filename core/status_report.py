@@ -26,6 +26,8 @@ from core.game_speed import read_game_speed_control
 
 Frame = NDArray[np.uint8]
 
+_GAME_SPEED_OCR_RETRIES = 2
+
 
 class StateChangeTracker:
     """Emit structured logs when primary/menu/overlay states change."""
@@ -100,6 +102,7 @@ class StatusReporter:
         self._save_coin_samples = Path(save_coin_samples) if save_coin_samples else None
 
         self._last_status_ts: float = 0.0
+        self._game_speed_ocr_misses = 0
         self._coin_rate_samples: list[dict[str, object]] = []
 
     @property
@@ -117,6 +120,7 @@ class StatusReporter:
         """Make the next captured frame publish a fresh status observation."""
 
         self._last_status_ts = 0.0
+        self._game_speed_ocr_misses = 0
 
     def maybe_report(
         self,
@@ -147,6 +151,7 @@ class StatusReporter:
         game_speed_conf = -1.0
 
         if ui_state != "RUNNING":
+            self._game_speed_ocr_misses = 0
             wave = None
             wave_conf = -1.0
         else:
@@ -157,6 +162,17 @@ class StatusReporter:
                     game_speed_conf = speed_reading.confidence
             except Exception:
                 game_speed, game_speed_conf = None, -1.0
+
+            # A status report is fed one fresh main-loop frame per call. Defer
+            # a missing reading through two more frames so a transient OCR
+            # miss does not immediately replace the observed speed. This
+            # performs no extra capture or input and keeps the eventual status
+            # fields contemporaneous with the frame that is actually logged.
+            if game_speed is None:
+                if self._game_speed_ocr_misses < _GAME_SPEED_OCR_RETRIES:
+                    self._game_speed_ocr_misses += 1
+                    return
+            self._game_speed_ocr_misses = 0
 
             # The app already observed this frame's wave. Repeat OCR only when
             # an explicit diagnostic sample requested the winning bin image;

@@ -3144,9 +3144,12 @@ public partial class MainWindow : Window
             ? "Maximum (x6.3)"
             : $"x{_gameSpeedTarget:F1}";
         var observedGameSpeed = status.Observation?.GameSpeed;
+        var speedOcrExpected = status.Observation?.StateLabel.StartsWith(
+            "RUNNING",
+            StringComparison.OrdinalIgnoreCase) == true;
         ObservedSpeedText.Text = observedGameSpeed is double observed
             ? $"x{observed:F1}"
-            : "Not observed";
+            : speedOcrExpected ? "OCR missed" : "—";
         var exactSpeedReached = observedGameSpeed is double exactObserved
             && Math.Abs(exactObserved - _gameSpeedTarget) <= 0.06;
         var maximumSpeedReached = observedGameSpeed is double maximumObserved
@@ -3157,7 +3160,9 @@ public partial class MainWindow : Window
         if (_gameSpeedTarget < 6.3)
         {
             GameSpeedTargetText.Text = observedGameSpeed is not double current
-                ? $"Target x{_gameSpeedTarget:F1} · observed speed unavailable"
+                ? speedOcrExpected
+                    ? $"Target x{_gameSpeedTarget:F1} · latest speed OCR missed"
+                    : $"Target x{_gameSpeedTarget:F1} · no active-battle reading"
                 : exactSpeedReached
                     ? $"Target x{_gameSpeedTarget:F1} · observed x{current:F1}"
                     : $"Target x{_gameSpeedTarget:F1} · observed x{current:F1} "
@@ -3170,7 +3175,9 @@ public partial class MainWindow : Window
                     ? $"Maximum available · observed x{current:F1}"
                     : $"Maximum available · observed x{current:F1} "
                         + "· increase pending"
-                : "Maximum available · observed speed unavailable";
+                : speedOcrExpected
+                    ? "Maximum available · latest speed OCR missed"
+                    : "Maximum available · no active-battle reading";
         }
         GameSpeedTargetText.Foreground = _gameSpeedTarget < 6.3
             ? new SolidColorBrush(Color.FromRgb(241, 191, 91))

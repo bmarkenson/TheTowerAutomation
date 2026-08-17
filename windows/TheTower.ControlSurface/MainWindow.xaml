@@ -265,7 +265,7 @@
             <TextBlock Text="TARGET SPEED" Foreground="{StaticResource MutedBrush}" FontSize="9" />
             <TextBlock x:Name="TargetSpeedText" Text="-" FontSize="15" FontWeight="Bold" />
           </StackPanel>
-          <StackPanel Grid.Row="1" Grid.Column="4" Margin="2,0,12,0" ToolTip="Speed read directly from the latest periodic game screenshot.">
+          <StackPanel Grid.Row="1" Grid.Column="4" Margin="2,0,12,0" ToolTip="Speed OCR from periodic Running frames. A miss is retried on two fresh frames; OCR missed means no trustworthy reading was obtained before status was published. Target speed and save-derived effective speed remain separate.">
             <TextBlock Text="OBSERVED SPEED" Foreground="{StaticResource MutedBrush}" FontSize="9" />
             <TextBlock x:Name="ObservedSpeedText" Text="-" FontSize="15" FontWeight="Bold" />
           </StackPanel>
@@ -273,49 +273,53 @@
             <TextBlock Text="HEARTBEAT" Foreground="{StaticResource MutedBrush}" FontSize="9" />
             <TextBlock x:Name="HeartbeatText" Text="-" FontSize="15" FontWeight="Bold" TextWrapping="Wrap" />
           </StackPanel>
-          <UniformGrid Grid.Row="2" Grid.ColumnSpan="6" Rows="1" Margin="0,9,0,0">
-            <StackPanel x:Name="WholeRunCphMetricPanel"
-                        Visibility="Collapsed"
-                        Margin="2,0,12,0"
-                        ToolTip="Realized coins per hour from cumulative save coins and real time. This is distinct from OCR Coins/min.">
-              <TextBlock Text="WHOLE-RUN CPH" Foreground="{StaticResource MutedBrush}" FontSize="9" />
-              <TextBlock x:Name="WholeRunCphText" Text="-" FontSize="15" FontWeight="Bold" />
-            </StackPanel>
-            <StackPanel x:Name="IntervalCphMetricPanel"
-                        Visibility="Collapsed"
-                        Margin="2,0,12,0"
-                        ToolTip="Realized coins per hour between the two latest compatible save checkpoints.">
-              <TextBlock Text="INTERVAL CPH" Foreground="{StaticResource MutedBrush}" FontSize="9" />
-              <TextBlock x:Name="IntervalCphText" Text="-" FontSize="15" FontWeight="Bold" />
-            </StackPanel>
-            <StackPanel x:Name="CellsHourMetricPanel"
-                        Visibility="Collapsed"
-                        Margin="2,0,12,0"
-                        ToolTip="Whole-run realized cells per hour from cumulative save cells and real time.">
-              <TextBlock Text="CELLS / H" Foreground="{StaticResource MutedBrush}" FontSize="9" />
-              <TextBlock x:Name="CellsHourText" Text="-" FontSize="15" FontWeight="Bold" />
-            </StackPanel>
-            <StackPanel x:Name="WavesHourMetricPanel"
-                        Visibility="Collapsed"
-                        Margin="2,0,12,0"
-                        ToolTip="Whole-run waves per hour from the save checkpoint wave and real time.">
-              <TextBlock Text="WAVES / H" Foreground="{StaticResource MutedBrush}" FontSize="9" />
-              <TextBlock x:Name="WavesHourText" Text="-" FontSize="15" FontWeight="Bold" />
-            </StackPanel>
-            <StackPanel x:Name="EffectiveSpeedMetricPanel"
-                        Visibility="Collapsed"
-                        Margin="2,0,12,0"
-                        ToolTip="Effective game speed calculated from cumulative save game time divided by real time.">
-              <TextBlock Text="EFFECTIVE SPEED" Foreground="{StaticResource MutedBrush}" FontSize="9" />
-              <TextBlock x:Name="EffectiveSpeedText" Text="-" FontSize="15" FontWeight="Bold" />
-            </StackPanel>
-            <StackPanel x:Name="MetricCheckpointPanel"
-                        Visibility="Collapsed"
-                        Margin="2,0,0,0">
-              <TextBlock Text="SAVE CHECKPOINT" Foreground="{StaticResource MutedBrush}" FontSize="9" />
-              <TextBlock x:Name="MetricCheckpointText" Text="-" FontSize="15" FontWeight="Bold" TextWrapping="Wrap" />
-            </StackPanel>
-          </UniformGrid>
+          <StackPanel Grid.Row="2" Grid.Column="0"
+                      x:Name="WholeRunCphMetricPanel"
+                      Visibility="Collapsed"
+                      Margin="2,9,12,0"
+                      ToolTip="Realized coins per hour from cumulative save coins and real time. This is distinct from OCR Coins/min.">
+            <TextBlock Text="WHOLE-RUN CPH" Foreground="{StaticResource MutedBrush}" FontSize="9" />
+            <TextBlock x:Name="WholeRunCphText" Text="-" FontSize="15" FontWeight="Bold" />
+          </StackPanel>
+          <StackPanel Grid.Row="2" Grid.Column="1"
+                      x:Name="IntervalCphMetricPanel"
+                      Visibility="Collapsed"
+                      Margin="2,9,12,0"
+                      ToolTip="Recent coins per hour: coins gained between the two latest compatible save checkpoints, divided by their real elapsed time and expressed per hour. Whole-run CPH remains the battle average.">
+            <TextBlock Text="RECENT CPH" Foreground="{StaticResource MutedBrush}" FontSize="9" />
+            <TextBlock x:Name="IntervalCphText" Text="-" FontSize="15" FontWeight="Bold" />
+          </StackPanel>
+          <StackPanel Grid.Row="2" Grid.Column="2"
+                      x:Name="CellsHourMetricPanel"
+                      Visibility="Collapsed"
+                      Margin="2,9,12,0"
+                      ToolTip="Whole-run realized cells per hour from cumulative save cells and real time.">
+            <TextBlock Text="CELLS / H" Foreground="{StaticResource MutedBrush}" FontSize="9" />
+            <TextBlock x:Name="CellsHourText" Text="-" FontSize="15" FontWeight="Bold" />
+          </StackPanel>
+          <StackPanel Grid.Row="2" Grid.Column="3"
+                      x:Name="WavesHourMetricPanel"
+                      Visibility="Collapsed"
+                      Margin="2,9,12,0"
+                      ToolTip="Whole-run waves per hour from the save checkpoint wave and real time.">
+            <TextBlock Text="WAVES / H" Foreground="{StaticResource MutedBrush}" FontSize="9" />
+            <TextBlock x:Name="WavesHourText" Text="-" FontSize="15" FontWeight="Bold" />
+          </StackPanel>
+          <StackPanel Grid.Row="2" Grid.Column="4"
+                      x:Name="EffectiveSpeedMetricPanel"
+                      Visibility="Collapsed"
+                      Margin="2,9,12,0"
+                      ToolTip="Effective game speed calculated from cumulative save game time divided by real time.">
+            <TextBlock Text="EFFECTIVE SPEED" Foreground="{StaticResource MutedBrush}" FontSize="9" />
+            <TextBlock x:Name="EffectiveSpeedText" Text="-" FontSize="15" FontWeight="Bold" />
+          </StackPanel>
+          <StackPanel Grid.Row="2" Grid.Column="5"
+                      x:Name="MetricCheckpointPanel"
+                      Visibility="Collapsed"
+                      Margin="2,9,0,0">
+            <TextBlock Text="SAVE CHECKPOINT" Foreground="{StaticResource MutedBrush}" FontSize="9" />
+            <TextBlock x:Name="MetricCheckpointText" Text="-" FontSize="15" FontWeight="Bold" TextWrapping="Wrap" />
+          </StackPanel>
         </Grid>
       </StackPanel>
     </Border>

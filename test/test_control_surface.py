@@ -4491,15 +4491,24 @@ def test_native_status_uses_only_published_dashboard_metrics():
     assert 'JsonPropertyName("active_run_metrics")' in native_models
     assert 'JsonPropertyName("whole_run")' in native_models
     assert 'JsonPropertyName("interval")' in native_models
-    for field in (
-        "WholeRunCphMetricPanel",
-        "IntervalCphMetricPanel",
-        "CellsHourMetricPanel",
-        "WavesHourMetricPanel",
-        "EffectiveSpeedMetricPanel",
-        "MetricCheckpointPanel",
-    ):
-        assert f'x:Name="{field}"' in native_xaml
+    metric_columns = {
+        "WholeRunCphMetricPanel": 0,
+        "IntervalCphMetricPanel": 1,
+        "CellsHourMetricPanel": 2,
+        "WavesHourMetricPanel": 3,
+        "EffectiveSpeedMetricPanel": 4,
+        "MetricCheckpointPanel": 5,
+    }
+    for field, column in metric_columns.items():
+        assert (
+            f'<StackPanel Grid.Row="2" Grid.Column="{column}"\n'
+            f'                      x:Name="{field}"'
+        ) in native_xaml
+    assert '<UniformGrid Grid.Row="2" Grid.ColumnSpan="6"' not in native_xaml
+    assert 'Text="RECENT CPH"' in native_xaml
+    assert "Whole-run CPH remains the battle average." in native_xaml
+    assert 'ToolTip="Speed OCR from periodic Running frames.' in native_xaml
+    assert 'speedOcrExpected ? "OCR missed" : "—";' in native_code
     assert "ActiveRunMetricPresenter.Present(" in native_code
     assert "RenderActiveRunMetrics(" in native_code
     assert native_code.count("ClearActiveRunMetrics();") >= 3

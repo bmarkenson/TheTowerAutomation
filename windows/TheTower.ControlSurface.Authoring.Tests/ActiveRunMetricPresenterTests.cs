@@ -40,7 +40,7 @@ public sealed class ActiveRunMetricPresenterTests
         Assert.Equal("1.25K", presentation.WavesPerHour);
         Assert.Equal("x4.984", presentation.EffectiveSpeed);
         Assert.Equal(
-            "Wave 4,321 · 1m ago · Partial",
+            "W4,321 · 1m ago · Partial",
             presentation.Checkpoint);
         Assert.Contains("Captured", presentation.CheckpointDetail);
         Assert.Contains("using Linux server time", presentation.CheckpointDetail);
@@ -48,6 +48,26 @@ public sealed class ActiveRunMetricPresenterTests
         Assert.Contains(
             "Reason: one or more metric claims unavailable.",
             presentation.CheckpointDetail);
+    }
+
+    [Fact]
+    public void KeepsAnObservedCheckpointCompactForTheStatusColumn()
+    {
+        var presentation = ActiveRunMetricPresenter.Present(
+            new ActiveRunMetricStatus
+            {
+                SchemaVersion = 1,
+                Status = "observed",
+                ActiveRoundIdentityFingerprint = RoundIdentity,
+                CapturedAt = "2026-08-17T20:00:00+00:00",
+                AgeSeconds = 120,
+                CheckpointWave = 5765,
+            },
+            observedRoundIdentity: RoundIdentity,
+            activeBattleAvailable: true);
+
+        Assert.Equal("W5,765 · 2m ago", presentation.Checkpoint);
+        Assert.Contains("Metric status: Observed.", presentation.CheckpointDetail);
     }
 
     [Theory]

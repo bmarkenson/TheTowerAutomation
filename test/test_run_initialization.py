@@ -3811,6 +3811,125 @@ class PausedStartupObservationTests(unittest.TestCase):
             ),
         )
 
+    def test_status_reporting_retries_speed_ocr_on_two_fresh_frames(self):
+        frames = [
+            np.full((2, 2, 3), marker, dtype=np.uint8)
+            for marker in (1, 2, 3)
+        ]
+        supervisor = AutomationSupervisor(
+            control_file=self._control_file,
+            auto_return_enabled=False,
+        )
+        reporter = StatusReporter(
+            interval_secs=1,
+            supervisor=supervisor,
+            save_wave_samples=None,
+            save_coin_samples=None,
+        )
+
+        with (
+            patch(
+                "core.status_report.read_game_speed_control",
+                side_effect=[
+                    SimpleNamespace(valid=False, value=None),
+                    SimpleNamespace(valid=False, value=None),
+                    SimpleNamespace(valid=True, value=6.3, confidence=98.0),
+                ],
+            ) as speed_reader,
+            patch(
+                "core.status_report.detect_coins_from_image",
+                return_value=(Decimal("10"), 99.0, True),
+            ) as coins_reader,
+            patch.object(
+                supervisor,
+                "process_coins",
+                return_value=(Decimal("10"), 99.0, True, Decimal("10")),
+            ) as process_coins,
+            patch.object(supervisor, "format_state", return_value="RUNNING"),
+            patch("core.status_report.log_status") as status_log,
+        ):
+            for attempt, frame in enumerate(frames, start=1):
+                reporter.maybe_report(
+                    img=frame,
+                    ui_state="RUNNING",
+                    menu=None,
+                    secondary=set(),
+                    overlays=set(),
+                    wave=attempt,
+                    wave_conf=99.0,
+                    now_ts=float(attempt),
+                    allow_actions=False,
+                )
+                if attempt < 3:
+                    status_log.assert_not_called()
+                    coins_reader.assert_not_called()
+                    process_coins.assert_not_called()
+
+        assert speed_reader.call_count == 3
+        for index, frame in enumerate(frames):
+            assert speed_reader.call_args_list[index].args[0] is frame
+        status_log.assert_called_once_with(
+            "State=RUNNING | Wave=3 | Coins/min=10 | Speed=x6.3",
+            detail=(
+                "[STATUS_DETAIL] State=RUNNING | Wave=3 | Coins/min=10 | "
+                "Speed=x6.3 | Menu=— | Secondary=[—] | Overlays=[—]"
+            ),
+        )
+        coins_reader.assert_called_once()
+        process_coins.assert_called_once()
+
+    def test_status_reporting_marks_speed_missing_after_retry_budget(self):
+        frame = np.zeros((2, 2, 3), dtype=np.uint8)
+        supervisor = AutomationSupervisor(
+            control_file=self._control_file,
+            auto_return_enabled=False,
+        )
+        reporter = StatusReporter(
+            interval_secs=1,
+            supervisor=supervisor,
+            save_wave_samples=None,
+            save_coin_samples=None,
+        )
+
+        with (
+            patch(
+                "core.status_report.read_game_speed_control",
+                return_value=SimpleNamespace(valid=False, value=None),
+            ) as speed_reader,
+            patch(
+                "core.status_report.detect_coins_from_image",
+                return_value=(None, -1.0, False),
+            ),
+            patch.object(
+                supervisor,
+                "process_coins",
+                return_value=(None, -1.0, False, None),
+            ),
+            patch.object(supervisor, "format_state", return_value="RUNNING"),
+            patch("core.status_report.log_status") as status_log,
+        ):
+            for attempt in range(1, 4):
+                reporter.maybe_report(
+                    img=frame,
+                    ui_state="RUNNING",
+                    menu=None,
+                    secondary=set(),
+                    overlays=set(),
+                    wave=attempt,
+                    wave_conf=99.0,
+                    now_ts=float(attempt),
+                    allow_actions=False,
+                )
+
+        assert speed_reader.call_count == 3
+        status_log.assert_called_once_with(
+            "State=RUNNING | Wave=3 | Coins/min=— | Speed=—",
+            detail=(
+                "[STATUS_DETAIL] State=RUNNING | Wave=3 | Coins/min=— | "
+                "Speed=— | Menu=— | Secondary=[—] | Overlays=[—]"
+            ),
+        )
+
     def test_status_reporting_collects_structured_coin_rate_samples(self):
         frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
         supervisor = AutomationSupervisor(

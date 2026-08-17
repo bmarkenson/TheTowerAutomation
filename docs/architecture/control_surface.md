@@ -1392,9 +1392,10 @@ Process request examples:
   never establishes battle identity or authority. Server revision 47 and
   `active_run_metrics_v1` add the latest accepted save-backed checkpoint to the
   same runtime-owned snapshot. The native status row shows whole-run realized
-  CPH, compatible-checkpoint interval CPH, whole-run cells/hour, waves/hour,
-  effective speed, and the checkpoint wave, server-derived age, and semantic
-  status. It never converts OCR Coins/min into CPH. Polling reads only the
+  CPH, recent CPH from the latest compatible save-checkpoint interval,
+  whole-run cells/hour, waves/hour, effective speed, and compact checkpoint
+  wave and server-derived age. Nonstandard semantic status remains visible. It
+  never converts OCR Coins/min into CPH. Polling reads only the
   existing `ActiveRunMetricMonitor` projection; it performs no save acquisition
   or forced write and does not change the independent passive cadence. The
   runtime projection, authority snapshot, and structured observation must all
@@ -1515,11 +1516,14 @@ Process request examples:
   reload and automatic-attachment controls are intentionally absent.
 - Target and observed game speed are separate fields. Selecting a target
   persists operator intent and immediately re-arms enforcement during
-  `RUNNING`; every periodic status frame independently reads the visible game
-  speed without extra capture or input. The native and browser clients show
-  both values, and retained Coins/min samples include the corresponding
-  observed speed for mid-run analysis. This requires server revision 16 and
-  capability `observed_game_speed`.
+  `RUNNING`. When a periodic status is due, the runtime reads visible speed
+  from the current main-loop frame; an initial miss defers publication through
+  two later fresh main-loop frames before reporting the speed unavailable.
+  Those retries reuse ordinary captures and send no input. The native and
+  browser clients show target and observed values separately, and retained
+  Coins/min samples include the corresponding observed speed for mid-run
+  analysis. This requires server revision 16 and capability
+  `observed_game_speed`.
 - Persistent ADB-port selection for the next managed start, plus live handoff
   while the runtime has acknowledged indefinite `PAUSED`. **System >
   Services** shows configured next-start, requested/acknowledged, active

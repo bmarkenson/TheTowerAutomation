@@ -301,10 +301,13 @@ current activity scope are both present. It calculates that value from the
 scope's published start and the same response's Linux server timestamp, not
 from Activity prose or the Windows clock. Wave and Coins/min disappear outside
 a fresh active-battle observation. During a fresh exact-owner active battle, a
-second row shows the latest accepted save checkpoint's whole-run realized CPH,
-compatible-checkpoint interval CPH, whole-run cells/hour, waves/hour, and
-effective speed, followed by checkpoint wave, Linux-server-derived age, and
-semantic status. These fields reuse passive `ActiveRunMetricMonitor` state;
+third row, aligned to the status columns above it, shows the latest accepted
+save checkpoint's whole-run realized CPH, recent CPH from the two latest
+compatible save checkpoints, whole-run cells/hour, waves/hour, and effective
+speed, followed by compact checkpoint wave and Linux-server-derived age.
+Semantic status remains in the checkpoint detail and joins the compact value
+when it is not the normal `Observed` state. These fields reuse passive
+`ActiveRunMetricMonitor` state;
 status polling never acquires or forces a save and never turns OCR Coins/min
 into realized CPH. The metric projection, authority snapshot, and structured
 observation must carry the same forced-save round identity, and its rates must
@@ -341,8 +344,12 @@ Authority**, observed **Game Screen**, **Strategy Scope**, and **When This
 Battle Ends**. For example, a stopped process remains `Stopped` even when a
 saved next-start directive exists; the requested directive is shown separately
 from effective authority. A second row retains Wave, Coins/min, target versus
-observed speed, and heartbeat freshness. Service, PID, lock, and detailed
-runtime evidence remain available under System without occupying the
+observed speed, and heartbeat freshness. During `RUNNING`, **Observed Speed**
+uses up to three fresh frames: the initial OCR attempt plus two bounded
+retries. `OCR missed` means all three lacked a trustworthy reading, not that
+the target or save-derived effective speed is unknown. Outside a running
+battle the field shows a dash. Service, PID, lock, and detailed runtime
+evidence remain available under System without occupying the
 always-visible status area. Previous Game Screen is diagnostic detail and is
 collapsed by default.
 
