@@ -1129,10 +1129,14 @@ first appends that aggregate and the server reason to the durable
 `host-performance-rejected.jsonl` diagnostic spool, then atomically removes
 only that UUID from the pending spool so valid neighbors can retry. A failure
 to preserve or checkpoint the rejected aggregate leaves it pending; an
-unindexed request rejection never authorizes removal. The GUI reports rejected
-aggregates separately from capacity drops. The diagnostic spool retains the
-newest 1,024 unique rejected aggregates so a systematic producer fault cannot
-grow local storage without bound. Aggregate UUIDs are primary keys in
+unindexed request rejection never authorizes removal. The compact GUI queue
+state reports live sampling/backlog state, current upload errors, and capacity
+drops; a successful acknowledgement clears the current upload error. Retained
+schema-rejection history and its latest reason remain available in the Host
+Health tooltip as diagnostic context rather than a current-failure indicator.
+The diagnostic spool retains the newest 1,024 unique rejected aggregates so a
+systematic producer fault cannot grow local storage without bound. Aggregate
+UUIDs are primary keys in
 `logs/host_performance.sqlite3`, so retrying after a lost response is safe. The
 Linux store also records the server's current run at ingest as separate
 diagnostic context, keeps the sample-time run authoritative, and prunes records

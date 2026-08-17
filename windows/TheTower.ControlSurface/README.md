@@ -964,10 +964,14 @@ response names only that batch index. The client preserves the exact aggregate
 and reason in
 `%LOCALAPPDATA%\TheTower\host-performance-rejected.jsonl`, atomically removes
 only that record from the pending spool, and retries its valid neighbors. The
-queue display counts these rejected diagnostic records separately from records
-dropped at the 24-hour capacity boundary; the rejected spool retains the newest
-1,024 unique records. A request-level rejection or a local
-preservation/checkpoint failure leaves the pending record untouched. Linux stores
+compact queue display stays focused on live sampling, backlog, and upload state
+plus records dropped at the 24-hour capacity boundary. A current upload error
+appears there as **upload issue** and clears after a later successful
+acknowledgement. Retained schema-rejection history and its latest reason remain
+available in the Host Health tooltip, where the count is explicitly diagnostic
+rather than a current-failure indicator. The rejected spool retains the newest
+1,024 unique records. A request-level rejection or a local preservation/checkpoint
+failure leaves the pending record untouched. Linux stores
 idempotent aggregates in `logs/host_performance.sqlite3` with sample-time host,
 ADB-port, UTC, and fresh current-run correlation. Base and GPU publication
 require server revision 13 and capabilities `host_performance_telemetry_v1`

@@ -4452,10 +4452,9 @@ public partial class MainWindow : Window
             HostTelemetryQueueText.Text +=
                 $" · {snapshot.DroppedAggregateCount} dropped";
         }
-        if (snapshot.RejectedAggregateCount > 0)
+        if (!string.IsNullOrWhiteSpace(snapshot.UploadError))
         {
-            HostTelemetryQueueText.Text +=
-                $" · {snapshot.RejectedAggregateCount} rejected";
+            HostTelemetryQueueText.Text += " · upload issue";
         }
 
         var details = new List<string>
@@ -4542,13 +4541,14 @@ public partial class MainWindow : Window
         if (snapshot.RejectedAggregateCount > 0)
         {
             details.Add(
-                $"Rejected telemetry: {snapshot.RejectedAggregateCount} "
+                $"Retained rejection history: {snapshot.RejectedAggregateCount} "
                 + "schema-rejected aggregate(s) preserved in "
-                + "host-performance-rejected.jsonl."
+                + "host-performance-rejected.jsonl. This count does not by "
+                + "itself indicate a current upload problem."
                 + (string.IsNullOrWhiteSpace(
                         snapshot.LastRejectedAggregateReason)
                     ? ""
-                    : $" Latest reason: "
+                    : $" Latest retained reason: "
                         + snapshot.LastRejectedAggregateReason));
         }
         HostPerformancePanel.ToolTip = string.Join(

@@ -1042,6 +1042,15 @@ def test_native_host_sampling_control_is_persistent_and_unambiguous():
     assert queue_presentation.index('"Sampling off"') < queue_presentation.index(
         '"Buffering"'
     )
+    queue_status_block = window_code.split(
+        "HostTelemetryQueueText.Text = ", maxsplit=1
+    )[1].split("var details =", maxsplit=1)[0]
+    assert "RejectedAggregateCount" not in queue_status_block
+    assert "snapshot.UploadError" in queue_status_block
+    assert '" · upload issue"' in queue_status_block
+    assert "Retained rejection history:" in window_code
+    assert "does not by " in window_code
+    assert "itself indicate a current upload problem." in window_code
     assert "Host sampling is off; the independent uploader" in window_code
     assert "Sampling paused" not in tracker
     assert "Pause sampling" not in window_code
