@@ -39,6 +39,29 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-17 Windows status alignment and speed OCR retries
+
+- Exact implementation candidate `26818db` places the save-backed metric row
+  in the status band's existing six columns instead of an independently equal
+  grid. **Recent CPH** now names and explains the latest compatible
+  save-to-save interval, and the normal checkpoint value is compact while its
+  semantic detail remains available.
+- A due `RUNNING` status now defers a failed speed OCR through two later fresh
+  main-loop frames. It publishes the first trustworthy result or reports the
+  speed missing only after all three attempts; the retries use ordinary
+  captures, send no input, and keep wave, Coins/min, and speed on the frame
+  actually published. The native client labels that exhausted state `OCR
+  missed` and shows a dash where an active-battle reading does not apply.
+- The affected Python suite passed 276 tests, all 210 portable native tests
+  passed, and the Release WindowsDesktop cross-build completed with zero
+  errors. The exact candidate passed compilation, state definitions, clickmap
+  integrity with zero errors and the established 44 orphan notices, and all
+  3,031 repository tests in 434.89 seconds using development-environment
+  fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+  The only native warning was the established read-only NuGet vulnerability-
+  cache `NU1900`; the cross-build is not a Windows runtime validation.
+
 ### 2026-08-17 Live save-backed Windows run metrics
 
 - Exact implementation candidate `d9e950b` adds a compact native status row
