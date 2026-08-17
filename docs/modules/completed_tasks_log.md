@@ -39,6 +39,33 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-17 Live save-backed Windows run metrics
+
+- Exact implementation candidate `d9e950b` adds a compact native status row
+  for whole-run realized CPH, compatible-checkpoint interval CPH, whole-run
+  cells/hour, waves/hour, effective speed, and save-checkpoint wave, age, and
+  semantic status. It reuses the existing passive `ActiveRunMetricMonitor`
+  projection and performs no save acquisition, forced serialization, device
+  input, or cadence change. OCR Coins/min remains a distinct observation.
+- The audit binds every live rate to one newest save source and the same exact
+  active-round identity in the metric projection, structured observation, and
+  runtime authority snapshot. Identity/source ambiguity, stale or replaced
+  ownership, a non-active observation, and a failed Windows status poll all
+  clear the row instead of retaining prior-run values. Only the dashboard's
+  consumed rate fields cross the live API; detailed counters and cash/hour
+  remain in completed Battle History. Peak Coins/min remains separately owned
+  by its authoritative run-boundary backlog item and is not synthesized here.
+- The affected Python suite passed 197 tests, all 209 portable native tests
+  passed, and the Release WindowsDesktop cross-build completed with zero
+  errors. Its only warning was the established read-only NuGet vulnerability-
+  cache `NU1900`; the cross-build is not a Windows runtime validation.
+- The first complete checkpoint exposed one stale revision-46 assertion in a
+  separate API suite. Corrected candidate `d9e950b` then passed compilation,
+  state definitions, clickmap integrity with zero errors and the established
+  44 orphan notices, and all 3,029 repository tests in 439.70 seconds using
+  development-environment fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+
 ### 2026-08-17 Welcome Back active-battle recovery
 
 - [`ISSUE-2026-054`](../issues/resolved-2026.md#enabled-automation-could-not-recover-an-unowned-welcome-back-battle)
