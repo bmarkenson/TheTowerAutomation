@@ -312,11 +312,12 @@ def validate_workflow_evidence(value: object) -> Optional[dict[str, Any]]:
 def validate_process_restart_handoff(
     value: object,
 ) -> Optional[dict[str, Any]]:
-    """Return one same-battle process-restart attachment handoff.
+    """Return one active-battle process-restart attachment handoff.
 
-    The old runtime's evidence is retained only as the expected identity and
-    target for a fresh Attach workflow.  It is never itself replayable input
-    authority in the replacement process.
+    The old runtime's evidence is retained as the expected identity and target
+    for a fresh Attach workflow.  The replacement still forces the save: an
+    equal identity resumes that battle, while a later identity adopts the
+    successor.  The old evidence is never itself replayable input authority.
     """
 
     if not isinstance(value, Mapping) or value.get("schema_version") != 1:
@@ -365,6 +366,12 @@ def validate_process_restart_handoff(
         result["actual_active_round_identity_fingerprint"] = str(
             actual_identity
         )
+    battle_relation = value.get("battle_relation")
+    if battle_relation is not None:
+        battle_relation = str(battle_relation or "").strip().lower()
+        if battle_relation not in {"same_battle", "later_battle"}:
+            return None
+        result["battle_relation"] = battle_relation
     _copy_optional_fields(
         value,
         result,
@@ -378,9 +385,18 @@ def validate_process_restart_handoff(
     else:
         if "completed_at" not in result or not result.get("reason"):
             return None
-    if status == "completed" and (
-        workflow_id is None or actual_identity != expected_identity
-    ):
+    if status == "completed":
+        if workflow_id is None or actual_identity is None:
+            return None
+        inferred_relation = (
+            "same_battle"
+            if actual_identity == expected_identity
+            else "later_battle"
+        )
+        if battle_relation is not None and battle_relation != inferred_relation:
+            return None
+        result["battle_relation"] = inferred_relation
+    elif battle_relation is not None:
         return None
     return result
 

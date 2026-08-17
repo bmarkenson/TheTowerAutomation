@@ -15,9 +15,11 @@ from core.control_directives import ControlDirectiveStore
 from core.app import App
 from core.action_authority import (
     AuthorityHold,
+    AuthorityHoldState,
     AuxiliaryCollector,
     RuntimeActionClass,
 )
+from core.battle_identity import BattleIdentityRelation
 from core.battle_lifecycle import HomeBattleControl
 from core.emulator_degradation import (
     assess_emulator_degradation,
@@ -395,6 +397,329 @@ def test_game_restarted_handler_dispatches_only_from_fresh_modal_evidence():
             action=GameRestartedAction.END_RUN,
         )
     refused.assert_not_called()
+
+
+def _unexpected_restart_app() -> App:
+    app = App.__new__(App)
+    app._supervisor = SimpleNamespace(
+        control_state="RUNNING",
+        is_paused=False,
+        control_request_identity={"state_request_id": "state-enable-1"},
+        pause_for_catastrophic_failure=Mock(),
+        request_unexpected_restart_reattachment=Mock(),
+    )
+    app._mission_mgr = SimpleNamespace(
+        active_battle_observed=Mock(return_value=True),
+    )
+    app._retained_battle_identity_record = SimpleNamespace(
+        fingerprint=ACTIVE_BATTLE_IDENTITY,
+    )
+    app._unexpected_game_restart_reconciliation = None
+    app._emulator_maintenance_hold_active = False
+    app._external_development_hold_active = False
+    app._awaiting_initial_battle_intent = Mock(return_value=False)
+    app._operator_workflow_authority_hold = Mock(return_value=None)
+    app._runtime_status_owner = Mock(
+        return_value={
+            key: value
+            for key, value in RUNTIME.items()
+            if key != "state_request_id"
+        }
+    )
+    app._update_action_authority = Mock()
+    app._publish_action_authority = Mock()
+    app._runtime_action_guard = Mock(return_value=True)
+    app._capture_frame = Mock()
+    app._rearm_battle_identity_after_home_resume_dispatch = Mock()
+    app._runtime_uncertain_mutation_result = Mock()
+    app._blind_tapper_suspended = False
+    return app
+
+
+def test_unowned_welcome_back_resumes_for_retained_managed_battle():
+    app = _unexpected_restart_app()
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    resolved = RecoveryUiDispatchOutcome(
+        RecoveryUiDispatchStatus.RESOLVED,
+        input_dispatched=True,
+        attempts=1,
+        final_state="RUNNING",
+        reason="the modal cleared",
+    )
+
+    def dispatch(_frame, **kwargs):
+        assert kwargs["action_guard_fn"]()
+        return resolved
+
+    with (
+        patch("core.app.stop_blind_gem_tapper", return_value=True),
+        patch(
+            "core.app.handle_game_restarted",
+            side_effect=dispatch,
+        ) as handler,
+    ):
+        assert app._advance_unexpected_game_restart_recovery(
+            {"state": "GAME_RESTARTED"},
+            frame,
+        )
+
+    assert handler.call_args.kwargs["action"] is GameRestartedAction.RESUME
+    claim = app._unexpected_game_restart_reconciliation
+    assert claim["expected_identity_fingerprint"] == ACTIVE_BATTLE_IDENTITY
+    assert claim["resume_dispatched"] is True
+    assert claim["resume_resolved"] is True
+    app._rearm_battle_identity_after_home_resume_dispatch.assert_called_once()
+
+
+def test_retained_welcome_back_recovery_survives_fresh_process_start():
+    app = _unexpected_restart_app()
+    app._awaiting_initial_battle_intent.return_value = True
+    app._mission_mgr.active_battle_observed.return_value = False
+    app._operator_workflow_authority_hold.return_value = AuthorityHoldState(
+        AuthorityHold.OPERATOR_WORKFLOW,
+        "runtime is waiting for explicit initial intent",
+    )
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    resolved = RecoveryUiDispatchOutcome(
+        RecoveryUiDispatchStatus.RESOLVED,
+        input_dispatched=True,
+        attempts=1,
+        final_state="RUNNING",
+        reason="the modal cleared",
+    )
+
+    with patch(
+        "core.app.handle_game_restarted",
+        return_value=resolved,
+    ) as handler:
+        assert app._advance_unexpected_game_restart_recovery(
+            {"state": "GAME_RESTARTED"},
+            frame,
+        )
+
+    handler.assert_called_once()
+    assert app._unexpected_game_restart_reconciliation[
+        "expected_identity_fingerprint"
+    ] == ACTIVE_BATTLE_IDENTITY
+
+
+def test_resolved_welcome_back_owns_existing_forced_identity_path():
+    app = App.__new__(App)
+    app._external_development_hold_active = False
+    app._supervisor = SimpleNamespace(
+        battle_workflow=None,
+        manual_control=None,
+    )
+    app._terminal_home_continuation = None
+    app._unexpected_game_restart_reconciliation = {
+        "operation_id": "welcome-back-identity-1",
+        "resume_resolved": True,
+    }
+    app._unexpected_game_restart_owner_current = Mock(return_value=True)
+    app._awaiting_initial_battle_intent = Mock(return_value=False)
+    app._operator_workflow_authority_hold = Mock(return_value=None)
+
+    assert app._battle_identity_check_owner() == (
+        "welcome-back-identity-1",
+        "runtime_reconciliation",
+        AuthorityHold.BATTLE_IDENTITY,
+        "welcome_back_resume_reconciliation",
+    )
+
+
+def test_exact_welcome_back_claim_replaces_passive_initial_intent_hold():
+    app = App.__new__(App)
+    app._supervisor = SimpleNamespace(
+        manual_control_error=False,
+        interactive_development_lease_error=False,
+        battle_workflow_error=False,
+        setup_capture_error=False,
+        setup_capture=None,
+        manual_control=None,
+        battle_workflow=None,
+    )
+    app._terminal_home_continuation = None
+    app._started_battle_workflow_completion = None
+    app._unexpected_game_restart_reconciliation = {
+        "operation_id": "welcome-back-identity-1",
+        "resume_resolved": False,
+    }
+    app._awaiting_initial_battle_intent = Mock(return_value=True)
+    app._unexpected_game_restart_owner_current = Mock(return_value=True)
+    app._authority_holds = (
+        AuthorityHoldState(
+            AuthorityHold.BATTLE_IDENTITY,
+            "Welcome Back owns reconciliation",
+        ),
+    )
+
+    assert app._operator_workflow_authority_hold() is None
+    assert app._refreshed_operator_authority_holds(
+        release_stale=False,
+    ) == app._authority_holds
+
+
+def test_restart_handoff_attach_takes_over_resolved_welcome_back_claim():
+    app = App.__new__(App)
+    app._process_restart_reattachment_enabled = True
+    app._process_restart_reattachment_attempted = False
+    app._unexpected_game_restart_reconciliation = {
+        "operation_id": "welcome-back-1",
+        "resume_resolved": True,
+    }
+    app._unexpected_game_restart_owner_current = Mock(return_value=True)
+    app._supervisor = SimpleNamespace(
+        process_restart_handoff={
+            "handoff_id": "restart-1",
+            "status": "pending",
+            "workflow_id": None,
+            "source_evidence": {"adb_target": "localhost:5555"},
+        },
+        request_process_restart_reattachment=Mock(
+            return_value={
+                "request_id": "attach-1",
+                "intent": "attach_battle",
+            }
+        ),
+    )
+    app._fail_process_restart_reattachment = Mock()
+    app._log_operator_workflow_result = Mock()
+    current = {
+        "game_state": "active_battle",
+        "adb_target": "localhost:5555",
+    }
+
+    app._maybe_request_process_restart_reattachment(current)
+
+    app._supervisor.request_process_restart_reattachment.assert_called_once_with(
+        "restart-1",
+        evidence=current,
+    )
+    assert app._unexpected_game_restart_reconciliation is None
+    app._fail_process_restart_reattachment.assert_not_called()
+
+
+def test_welcome_back_same_identity_continues_without_attach():
+    app = _unexpected_restart_app()
+    app._unexpected_game_restart_reconciliation = {
+        "operation_id": "welcome-back-1",
+        "resume_resolved": True,
+        "expected_identity_fingerprint": ACTIVE_BATTLE_IDENTITY,
+    }
+    app._battle_identity_operation_id = "welcome-back-1"
+    result = SimpleNamespace(
+        complete=True,
+        identity=SimpleNamespace(fingerprint=ACTIVE_BATTLE_IDENTITY),
+        relation=BattleIdentityRelation.SAME_BATTLE,
+    )
+
+    app._reconcile_unexpected_game_restart_identity(result)
+
+    assert app._unexpected_game_restart_reconciliation is None
+    app._supervisor.request_unexpected_restart_reattachment.assert_not_called()
+    app._rearm_battle_identity_after_home_resume_dispatch.assert_not_called()
+
+
+def test_welcome_back_same_identity_on_fresh_runtime_routes_attach():
+    app = _unexpected_restart_app()
+    app._mission_mgr.active_battle_observed.return_value = False
+    app._awaiting_initial_battle_intent.return_value = True
+    app._unexpected_game_restart_reconciliation = {
+        "operation_id": "welcome-back-1",
+        "resume_resolved": True,
+        "expected_identity_fingerprint": ACTIVE_BATTLE_IDENTITY,
+    }
+    app._battle_identity_operation_id = "welcome-back-1"
+    evidence = {
+        "game_state": "active_battle",
+        "active_round_identity_fingerprint": ACTIVE_BATTLE_IDENTITY,
+    }
+    app._current_control_workflow_evidence = Mock(return_value=evidence)
+    app._supervisor.request_unexpected_restart_reattachment.return_value = {
+        "request_id": "attach-same-1",
+        "intent": "attach_battle",
+        "status": "requested",
+    }
+    result = SimpleNamespace(
+        complete=True,
+        identity=SimpleNamespace(fingerprint=ACTIVE_BATTLE_IDENTITY),
+        relation=BattleIdentityRelation.SAME_BATTLE,
+    )
+
+    app._reconcile_unexpected_game_restart_identity(result)
+
+    app._supervisor.request_unexpected_restart_reattachment.assert_called_once_with(
+        evidence=evidence,
+    )
+    app._rearm_battle_identity_after_home_resume_dispatch.assert_called_once()
+    assert app._unexpected_game_restart_reconciliation is None
+
+
+def test_welcome_back_later_identity_routes_through_normal_attach():
+    app = _unexpected_restart_app()
+    app._unexpected_game_restart_reconciliation = {
+        "operation_id": "welcome-back-1",
+        "resume_resolved": True,
+        "expected_identity_fingerprint": ACTIVE_BATTLE_IDENTITY,
+    }
+    app._battle_identity_operation_id = "welcome-back-1"
+    evidence = {
+        "game_state": "active_battle",
+        "active_round_identity_fingerprint": REPLACEMENT_BATTLE_IDENTITY,
+    }
+    app._current_control_workflow_evidence = Mock(return_value=evidence)
+    app._supervisor.request_unexpected_restart_reattachment.return_value = {
+        "request_id": "attach-later-1",
+        "intent": "attach_battle",
+        "status": "requested",
+    }
+    result = SimpleNamespace(
+        complete=True,
+        identity=SimpleNamespace(fingerprint=REPLACEMENT_BATTLE_IDENTITY),
+        relation=BattleIdentityRelation.LATER_BATTLE,
+    )
+
+    app._reconcile_unexpected_game_restart_identity(result)
+
+    app._supervisor.request_unexpected_restart_reattachment.assert_called_once_with(
+        evidence=evidence,
+    )
+    app._rearm_battle_identity_after_home_resume_dispatch.assert_called_once()
+    assert app._unexpected_game_restart_reconciliation is None
+
+
+def test_supervisor_can_create_runtime_welcome_back_attach(tmp_path):
+    control_file = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(control_file)
+    store.set_state("RUNNING", source="test")
+    supervisor = AutomationSupervisor(control_file=str(control_file))
+    supervisor.apply_control()
+    owner = supervisor.current_exclusive_validation_owner()
+    evidence = {
+        "schema_version": 1,
+        "runtime_id": owner["runtime_id"],
+        "pid": owner["pid"],
+        "adb_target": "localhost:5555",
+        "observation_id": f"{owner['runtime_id']}:1",
+        "observed_at": "2026-08-17T01:00:00-07:00",
+        "primary_state": "RUNNING",
+        "home_battle_control": "UNKNOWN",
+        "game_state": "active_battle",
+        "active_battle": True,
+        "activity_scope_run_id": "run-1",
+        "active_round_identity_fingerprint": REPLACEMENT_BATTLE_IDENTITY,
+        "target_generation": 7,
+    }
+
+    workflow = supervisor.request_unexpected_restart_reattachment(
+        evidence=evidence,
+    )
+
+    assert workflow is not None
+    assert workflow["intent"] == "attach_battle"
+    assert workflow["status"] == "requested"
+    assert workflow["updated_by"] == "runtime-welcome-back"
+    assert supervisor.battle_workflow == workflow
 
 
 def _battle(

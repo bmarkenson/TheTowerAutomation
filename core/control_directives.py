@@ -573,18 +573,6 @@ class ControlDirectiveStore:
                     or restart_handoff.get("workflow_id") is not None
                     or restart_handoff["source_evidence"].get("adb_target")
                     != normalized_evidence.get("adb_target")
-                    or (
-                        normalized_evidence.get(
-                            "active_round_identity_fingerprint"
-                        )
-                        is not None
-                        and normalized_evidence.get(
-                            "active_round_identity_fingerprint"
-                        )
-                        != restart_handoff[
-                            "expected_active_round_identity_fingerprint"
-                        ]
-                    )
                 ):
                     raise ValueError(
                         "Process restart handoff no longer matches this Attach request"
@@ -2107,10 +2095,11 @@ class ControlDirectiveStore:
         reason: str,
         workflow_id: Optional[str] = None,
         actual_active_round_identity: Optional[str] = None,
+        battle_relation: Optional[str] = None,
         source: str = "runtime",
         now: Optional[float] = None,
     ) -> Optional[dict[str, Any]]:
-        """Finish only the matching pending same-battle restart handoff."""
+        """Finish only the matching pending active-battle restart handoff."""
 
         normalized_handoff_id = str(handoff_id or "").strip()
         normalized_status = str(status or "").strip().lower()
@@ -2123,6 +2112,11 @@ class ControlDirectiveStore:
             if actual_active_round_identity is not None
             else None
         )
+        normalized_battle_relation = (
+            str(battle_relation or "").strip().lower()
+            if battle_relation is not None
+            else None
+        )
         if (
             not normalized_handoff_id
             or normalized_status not in {"completed", "failed", "cancelled"}
@@ -2130,6 +2124,11 @@ class ControlDirectiveStore:
             or (
                 actual_active_round_identity is not None
                 and normalized_actual_identity is None
+            )
+            or (
+                normalized_battle_relation is not None
+                and normalized_battle_relation
+                not in {"same_battle", "later_battle"}
             )
         ):
             raise ValueError("Invalid process restart handoff result")
@@ -2154,16 +2153,30 @@ class ControlDirectiveStore:
                         "Process restart result names a different Attach workflow"
                     )
                 handoff["workflow_id"] = normalized_workflow_id
-            if normalized_status == "completed" and (
-                handoff.get("workflow_id") is None
-                or normalized_actual_identity
-                != handoff[
+            if normalized_status == "completed":
+                expected_identity = handoff[
                     "expected_active_round_identity_fingerprint"
                 ]
-            ):
-                raise ValueError(
-                    "Process restart cannot complete without the expected battle identity"
+                inferred_relation = (
+                    "same_battle"
+                    if normalized_actual_identity == expected_identity
+                    else "later_battle"
+                    if normalized_actual_identity is not None
+                    else None
                 )
+                if handoff.get("workflow_id") is None or inferred_relation is None:
+                    raise ValueError(
+                        "Process restart cannot complete without a force-bound "
+                        "active battle identity"
+                    )
+                if (
+                    normalized_battle_relation is not None
+                    and normalized_battle_relation != inferred_relation
+                ):
+                    raise ValueError(
+                        "Process restart battle relation contradicts its identities"
+                    )
+                handoff["battle_relation"] = inferred_relation
             timestamp = _timestamp_at(now)
             handoff.update(
                 {

@@ -344,7 +344,7 @@ class AutomationSupervisor:
 
     @property
     def process_restart_handoff(self) -> Optional[Dict[str, object]]:
-        """Return the latest same-battle process-restart handoff."""
+        """Return the latest active-battle process-restart handoff."""
 
         return (
             deepcopy(self._process_restart_handoff)
@@ -354,7 +354,7 @@ class AutomationSupervisor:
 
     @property
     def process_restart_handoff_error(self) -> bool:
-        """Return whether the same-battle restart handoff is malformed."""
+        """Return whether the active-battle restart handoff is malformed."""
 
         return bool(self._process_restart_handoff_error)
 
@@ -1466,7 +1466,7 @@ class AutomationSupervisor:
             )
         except (ControlDirectiveError, ValueError) as exc:
             log(
-                "[PROCESS_RESTART] Failed creating same-battle Attach "
+                "[PROCESS_RESTART] Failed creating active-battle Attach "
                 f"workflow: {exc}",
                 "WARN",
             )
@@ -1482,13 +1482,38 @@ class AutomationSupervisor:
             self._process_restart_handoff = handoff
         return dict(workflow)
 
+    def request_unexpected_restart_reattachment(
+        self,
+        *,
+        evidence: Mapping[str, object],
+        strategy: Optional[str] = None,
+    ) -> Optional[Dict[str, object]]:
+        """Create a normal Attach after Welcome Back proves an active battle."""
+
+        try:
+            workflow = self._control_store.request_battle_workflow(
+                "attach_battle",
+                evidence=evidence,
+                strategy=strategy,
+                source="runtime-welcome-back",
+            )
+        except (ControlDirectiveError, ValueError) as exc:
+            log(
+                "[BATTLE_IDENTITY] Failed creating Welcome Back Attach "
+                f"workflow: {exc}",
+                "WARN",
+            )
+            return None
+        self._battle_workflow = dict(workflow)
+        return dict(workflow)
+
     def finish_process_restart_handoff(
         self,
         handoff_id: str,
         status: str,
         **details: object,
     ) -> Optional[Dict[str, object]]:
-        """Persist a terminal result for one same-battle restart handoff."""
+        """Persist a terminal result for one active-battle restart handoff."""
 
         try:
             handoff = self._control_store.finish_process_restart_handoff(

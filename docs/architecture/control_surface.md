@@ -98,14 +98,16 @@ agnostic.
   file-path, or ADB endpoint.
 - Complete Stop persists `STOPPED` before asking the fixed systemd user service
   to stop. When fresh exact evidence proves that automation currently owns an
-  active battle, Stop also retains a one-shot same-battle handoff. This applies
+  active battle, Stop also retains a one-shot active-battle handoff. This applies
   whether automation started that battle or attached to it later; wave changes
   do not change the battle identity. A later Start launches under `PAUSED`,
   creates a fresh ordinary Attach workflow, restores Enable, and returns only
-  after forced serialization proves and adopts that exact battle. If no such
-  handoff exists, Start remains Paused with no battle workflow selected and
-  does not enable actions, start a battle, or attach to one. Repeating an
-  already satisfied Start or Stop is an explicit no-op.
+  after forced serialization compares the current `ActiveRoundIdentity` with
+  the retained one. Equality reattaches the same battle; a later identity
+  discards old battle-local state and completes the same normal Attach for the
+  successor. If no such handoff exists, Start remains Paused with no battle
+  workflow selected and does not enable actions, start a battle, or attach to
+  one. Repeating an already satisfied Start or Stop is an explicit no-op.
 - For managed launches, the long-lived Linux control service is the sole ADB
   reconnect owner. It reads the same persisted port, starts or reuses the ADB
   server inside its own service lifetime, and maintains only that exact
@@ -120,9 +122,11 @@ agnostic.
 - The public one-step attached-reload action remains retired. Process
   replacement uses the durable Stop Automation then Start Automation boundary.
   A retained handoff never replays old authority: the replacement must own the
-  same ADB target, issue a fresh Attach, and force-prove the exact pre-Stop
-  battle identity. A different or ended battle, target mismatch, unavailable
-  proof, or failed Attach leaves Automation Paused for explicit intent.
+  same ADB target, issue a fresh Attach, and force-prove the current active
+  identity against the exact pre-Stop identity. Equality reattaches it; a later
+  identity attaches the successor. An ended battle, target mismatch,
+  unavailable proof, or failed Attach leaves Automation Paused for explicit
+  intent.
 - Start Battle is available only from fresh, owner-matched Home `NEW_BATTLE`
   evidence. The runtime revalidates the same PID, target, target generation,
   workflow operation, and boundary, then forces a save that must prove no

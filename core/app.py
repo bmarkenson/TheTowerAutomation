@@ -99,6 +99,7 @@ from core.battle_identity import (
     ActiveBattleIdentityCoordinator,
     ActiveBattleIdentityRecord,
     BattleIdentityCheckContext,
+    BattleIdentityCheckResult,
     BattleIdentityCheckStatus,
     BattleIdentityRelation,
     BattleIdentityStore,
@@ -687,6 +688,9 @@ class App:
         self._emulator_recovery_force_new_battle = False
         self._emulator_recovery_action_logged = False
         self._emulator_recovery_terminal_pending: Optional[Dict[str, Any]] = None
+        self._unexpected_game_restart_reconciliation: Optional[
+            Dict[str, Any]
+        ] = None
         self._last_screenshot_capture_result = None
         self._control_observation_sequence = 0
         self._control_observation: Optional[Dict[str, Any]] = None
@@ -1258,6 +1262,28 @@ class App:
                     AuthorityHold.OPERATOR_WORKFLOW,
                     "terminal_continuation_successor",
                 )
+        unexpected_restart = getattr(
+            self,
+            "_unexpected_game_restart_reconciliation",
+            None,
+        )
+        if (
+            isinstance(unexpected_restart, Mapping)
+            and unexpected_restart.get("resume_resolved") is True
+            and self._unexpected_game_restart_owner_current(
+                unexpected_restart
+            )
+        ):
+            operation_id = str(
+                unexpected_restart.get("operation_id") or ""
+            ).strip()
+            if operation_id:
+                return (
+                    operation_id,
+                    "runtime_reconciliation",
+                    AuthorityHold.BATTLE_IDENTITY,
+                    "welcome_back_resume_reconciliation",
+                )
         if self._awaiting_initial_battle_intent():
             return None
         competing = self._operator_workflow_authority_hold()
@@ -1561,6 +1587,7 @@ class App:
                 ),
                 operation_id=operation_id,
             )
+            self._reconcile_unexpected_game_restart_identity(result)
         else:
             self._active_round_identity = None
             self._active_round_identity_fingerprint = None
@@ -5215,7 +5242,7 @@ class App:
         current: Optional[Mapping[str, object]] = None,
         workflow_id: Optional[str] = None,
     ) -> bool:
-        """Fail closed when the replacement cannot prove the same battle."""
+        """Fail closed when the replacement cannot adopt an active battle."""
 
         handoff = getattr(
             self._supervisor,
@@ -5237,7 +5264,7 @@ class App:
                 current.get("active_round_identity_fingerprint") or ""
             ).strip() or None
         details: Dict[str, object] = {
-            "reason": str(reason or "same-battle proof failed").strip(),
+            "reason": str(reason or "active-battle proof failed").strip(),
         }
         if bound_workflow_id:
             details["workflow_id"] = bound_workflow_id
@@ -5249,13 +5276,13 @@ class App:
             **details,
         )
         self._supervisor.pause_for_operator_authority(
-            "same-battle process restart reattachment failed: "
+            "process restart battle reattachment failed: "
             f"{details['reason']}"
         )
         self._log_operator_workflow_result(
             f"{handoff_id}:failed",
             purpose="Reattaching automation after a process restart",
-            reason="resume only after a forced save proves the same battle",
+            reason="resume only after a forced save proves the active battle",
             result=(
                 "Automation remains Paused — automatic reattachment failed: "
                 f"{details['reason']}"
@@ -5290,9 +5317,6 @@ class App:
             return
         self._process_restart_reattachment_attempted = True
         handoff_id = str(handoff.get("handoff_id") or "")
-        expected_identity = str(
-            handoff.get("expected_active_round_identity_fingerprint") or ""
-        ).strip()
         source_evidence = handoff.get("source_evidence")
         if not (
             game_state in {"active_battle", "home_resume_battle"}
@@ -5300,17 +5324,8 @@ class App:
             and source_evidence.get("adb_target") == current.get("adb_target")
         ):
             self._fail_process_restart_reattachment(
-                "the replacement runtime no longer observes the same active "
-                "or resumable battle target",
-                current=current,
-            )
-            return
-        observed_identity = str(
-            current.get("active_round_identity_fingerprint") or ""
-        ).strip()
-        if observed_identity and observed_identity != expected_identity:
-            self._fail_process_restart_reattachment(
-                "the replacement runtime already proved a different battle",
+                "the replacement runtime no longer observes an active or "
+                "resumable battle on the retained target",
                 current=current,
             )
             return
@@ -5331,13 +5346,32 @@ class App:
                 current=current,
             )
             return
+        welcome_back_claim = getattr(
+            self,
+            "_unexpected_game_restart_reconciliation",
+            None,
+        )
+        if (
+            isinstance(welcome_back_claim, Mapping)
+            and welcome_back_claim.get("resume_resolved") is True
+            and self._unexpected_game_restart_owner_current(
+                welcome_back_claim
+            )
+        ):
+            # The durable restart Attach now owns the exact same/later forced
+            # save decision.  Retire the process-local Welcome Back claim so
+            # it cannot compete with that workflow's identity owner.
+            self._unexpected_game_restart_reconciliation = None
         self._log_operator_workflow_result(
             f"{handoff_id}:requested",
             purpose="Reattaching automation after a process restart",
-            reason="validate the exact battle retained by the Stop boundary",
+            reason=(
+                "force the current active battle and compare it with the "
+                "identity retained by the Stop boundary"
+            ),
             result=(
-                "Same-battle Attach requested — Automation remains Paused "
-                "until the control surface restores Enable"
+                "Active-battle Attach requested — Automation remains guarded "
+                "until forced identity validation completes"
             ),
         )
 
@@ -5360,37 +5394,47 @@ class App:
         actual = str(
             current.get("active_round_identity_fingerprint") or ""
         ).strip()
-        if not actual or actual != expected:
+        if not actual:
             self._fail_process_restart_reattachment(
-                "the completed Attach did not retain the expected battle identity",
+                "the completed Attach did not publish a force-bound battle identity",
                 current=current,
                 workflow_id=workflow_id,
             )
             return False
+        battle_relation = (
+            BattleIdentityRelation.SAME_BATTLE.value
+            if actual == expected
+            else BattleIdentityRelation.LATER_BATTLE.value
+        )
         result = self._supervisor.finish_process_restart_handoff(
             str(handoff.get("handoff_id") or ""),
             "completed",
             reason=(
-                "a fresh Attach workflow force-validated and adopted the same "
-                "battle after process replacement"
+                "a fresh Attach workflow force-validated and adopted the "
+                f"{battle_relation.replace('_', ' ')} after process replacement"
             ),
             workflow_id=workflow_id,
             actual_active_round_identity=actual,
+            battle_relation=battle_relation,
         )
         if not (
             isinstance(result, Mapping)
             and result.get("status") == "completed"
         ):
             self._supervisor.pause_for_operator_authority(
-                "same-battle reattachment completed locally but its durable "
+                "process-restart reattachment completed locally but its durable "
                 "handoff result could not be persisted"
             )
             return False
         self._log_operator_workflow_result(
             f"{handoff.get('handoff_id')}:completed",
             purpose="Completing process-restart battle reattachment",
-            reason="accept only the same forced-save battle identity",
-            result="Automation reattached to the same battle",
+            reason="adopt only the battle identified by the fresh forced save",
+            result=(
+                "Automation reattached to the same battle"
+                if battle_relation == BattleIdentityRelation.SAME_BATTLE.value
+                else "Automation attached to the newly proven later battle"
+            ),
         )
         return True
 
@@ -8844,6 +8888,28 @@ class App:
             # completed-receipt write is reporting-only and cannot retain the
             # operator input hold over the newly active battle.
             return None
+        unexpected_restart = getattr(
+            self,
+            "_unexpected_game_restart_reconciliation",
+            None,
+        )
+        if (
+            self._awaiting_initial_battle_intent()
+            and not (
+                isinstance(workflow, Mapping)
+                and workflow.get("status")
+                not in BATTLE_WORKFLOW_TERMINAL_STATUSES
+            )
+            and isinstance(unexpected_restart, Mapping)
+            and self._unexpected_game_restart_owner_current(
+                unexpected_restart
+            )
+        ):
+            # A retained exact-battle Welcome Back claim is the one reviewed
+            # route that may replace the passive initial-intent shell.  It
+            # grants only Resume plus forced identity reconciliation; a later
+            # or fresh-process battle still enters the normal Attach workflow.
+            return None
         if self._awaiting_initial_battle_intent():
             workflow_active = bool(
                 isinstance(workflow, Mapping)
@@ -9603,6 +9669,366 @@ class App:
             )
         self._emulator_recovery_action_logged = False
         return True
+
+    def _unexpected_game_restart_owner_current(
+        self,
+        claim: Mapping[str, object],
+    ) -> bool:
+        """Recheck one process-local Welcome Back reconciliation owner."""
+
+        supervisor = getattr(self, "_supervisor", None)
+        if (
+            supervisor is None
+            or str(getattr(supervisor, "control_state", "")).upper()
+            != "RUNNING"
+            or bool(getattr(supervisor, "is_paused", False))
+            or bool(getattr(self, "_emulator_maintenance_hold_active", False))
+            or bool(getattr(self, "_external_development_hold_active", False))
+        ):
+            return False
+        expected_owner = claim.get("runtime")
+        if not isinstance(expected_owner, Mapping):
+            return False
+        current_owner = self._runtime_status_owner()
+        if any(
+            expected_owner.get(field) != current_owner.get(field)
+            for field in (
+                "runtime_id",
+                "pid",
+                "adb_target",
+                "target_generation",
+            )
+        ):
+            return False
+        control_identity = getattr(
+            supervisor,
+            "control_request_identity",
+            None,
+        )
+        return bool(
+            isinstance(control_identity, Mapping)
+            and str(expected_owner.get("state_request_id") or "")
+            == str(control_identity.get("state_request_id") or "")
+        )
+
+    def _claim_unexpected_game_restart_reconciliation(
+        self,
+    ) -> Optional[Dict[str, Any]]:
+        """Claim Welcome Back only for an already managed exact battle."""
+
+        existing = getattr(
+            self,
+            "_unexpected_game_restart_reconciliation",
+            None,
+        )
+        if isinstance(existing, Mapping):
+            if self._unexpected_game_restart_owner_current(existing):
+                return existing if isinstance(existing, dict) else dict(existing)
+            self._unexpected_game_restart_reconciliation = None
+
+        supervisor = getattr(self, "_supervisor", None)
+        competing = (
+            self._operator_workflow_authority_hold()
+            if supervisor is not None
+            else None
+        )
+        workflow = getattr(supervisor, "battle_workflow", None)
+        workflow_active = bool(
+            isinstance(workflow, Mapping)
+            and workflow.get("status")
+            not in BATTLE_WORKFLOW_TERMINAL_STATUSES
+        )
+        passive_initial_intent = bool(
+            self._awaiting_initial_battle_intent()
+            and not workflow_active
+            and isinstance(competing, AuthorityHoldState)
+            and competing.hold is AuthorityHold.OPERATOR_WORKFLOW
+        )
+        if (
+            supervisor is None
+            or bool(getattr(supervisor, "is_paused", False))
+            or str(getattr(supervisor, "control_state", "")).upper()
+            != "RUNNING"
+            or (competing is not None and not passive_initial_intent)
+            or bool(getattr(self, "_external_development_hold_active", False))
+        ):
+            return None
+
+        retained = getattr(self, "_retained_battle_identity_record", None)
+        if retained is None:
+            store = getattr(self, "_battle_identity_store", None)
+            try:
+                retained = store.active() if store is not None else None
+            except BattleIdentityStoreError:
+                retained = None
+        expected_identity = str(
+            getattr(retained, "fingerprint", "") or ""
+        ).strip()
+        if not expected_identity:
+            return None
+
+        runtime = dict(self._runtime_status_owner())
+        control_identity = getattr(
+            supervisor,
+            "control_request_identity",
+            None,
+        )
+        state_request_id = str(
+            control_identity.get("state_request_id")
+            if isinstance(control_identity, Mapping)
+            else ""
+        ).strip()
+        if not (
+            str(runtime.get("runtime_id") or "").strip()
+            and type(runtime.get("pid")) is int
+            and int(runtime["pid"]) > 0
+            and str(runtime.get("adb_target") or "").strip()
+            and type(runtime.get("target_generation")) is int
+            and int(runtime["target_generation"]) > 0
+            and state_request_id
+        ):
+            return None
+        runtime["state_request_id"] = state_request_id
+        claim: Dict[str, Any] = {
+            "operation_id": new_operation_id(),
+            "runtime": runtime,
+            "expected_identity_fingerprint": expected_identity,
+            "resume_dispatched": False,
+            "resume_transactions": 0,
+        }
+        self._unexpected_game_restart_reconciliation = claim
+        return claim
+
+    def _advance_unexpected_game_restart_recovery(
+        self,
+        detection: Mapping[str, Any],
+        img: Frame,
+    ) -> bool:
+        """Resume an unplanned Welcome Back before forcing battle identity."""
+
+        if str(detection.get("state") or "").upper() != "GAME_RESTARTED":
+            return False
+        claim = self._claim_unexpected_game_restart_reconciliation()
+        if claim is None:
+            return False
+        if claim.get("resume_resolved") is True:
+            self._supervisor.pause_for_catastrophic_failure(
+                RuntimeFailureKind.SOURCE_RESTORATION_LOST,
+                reason=(
+                    "Welcome Back recurred after its verified Resume; the "
+                    "input will not be replayed"
+                ),
+            )
+            return True
+
+        self._update_action_authority(
+            detection=detection,
+            holds=(
+                AuthorityHoldState(
+                    AuthorityHold.BATTLE_IDENTITY,
+                    "Welcome Back Resume owns forced battle reconciliation",
+                ),
+            ),
+        )
+        self._publish_action_authority()
+        if stop_blind_gem_tapper():
+            self._blind_tapper_suspended = True
+
+        transaction = int(claim.get("resume_transactions") or 0) + 1
+        claim["resume_transactions"] = transaction
+        operation_id = (
+            f"{claim['operation_id']}:welcome-back-resume:{transaction}"
+        )
+        log_action_intent(
+            "Resuming the managed battle from Welcome Back",
+            reason=(
+                "force the save's canonical active-round ID immediately "
+                "after Resume"
+            ),
+            detail=(
+                "[WELCOME_BACK] expected_identity="
+                f"{str(claim['expected_identity_fingerprint'])[:16]}"
+            ),
+            operation_id=operation_id,
+        )
+
+        def action_allowed() -> bool:
+            if not self._runtime_action_guard(
+                action_class=RuntimeActionClass.LIFECYCLE_ACTION,
+                owner=AuthorityHold.BATTLE_IDENTITY,
+            ):
+                return False
+            return self._unexpected_game_restart_owner_current(claim)
+
+        outcome = handle_game_restarted(
+            img,
+            action=GameRestartedAction.RESUME,
+            action_guard_fn=action_allowed,
+            capture_fn=self._capture_frame,
+            max_attempts=2,
+        )
+        log_result(
+            "Welcome Back Resume transaction ended — "
+            f"{outcome.status.value.replace('_', ' ')}",
+            detail=(
+                f"[WELCOME_BACK] result={outcome.status.value} "
+                f"attempts={outcome.attempts} "
+                f"input_dispatched={outcome.input_dispatched} "
+                f"reason={outcome.reason}"
+            ),
+            operation_id=operation_id,
+            console=True,
+        )
+        if outcome.status in {
+            RecoveryUiDispatchStatus.RESOLVED,
+            RecoveryUiDispatchStatus.ALREADY_RESOLVED,
+        }:
+            claim["resume_dispatched"] = bool(outcome.input_dispatched)
+            claim["resume_resolved"] = True
+            self._rearm_battle_identity_after_home_resume_dispatch()
+            return True
+        if outcome.status is RecoveryUiDispatchStatus.DEFERRED:
+            return True
+
+        self._unexpected_game_restart_reconciliation = None
+        if outcome.status is RecoveryUiDispatchStatus.UNCERTAIN:
+            self._runtime_uncertain_mutation_result(
+                "Welcome Back Resume input result was uncertain"
+            )
+        elif (
+            outcome.status is RecoveryUiDispatchStatus.FAILED
+            or outcome.input_dispatched
+            and str(getattr(self._supervisor, "control_state", "")).upper()
+            == "RUNNING"
+        ):
+            self._supervisor.pause_for_catastrophic_failure(
+                RuntimeFailureKind.SOURCE_RESTORATION_LOST,
+                reason=(
+                    "Welcome Back remained after the bounded Resume "
+                    "transaction; the input will not be replayed"
+                ),
+            )
+        return True
+
+    def _reconcile_unexpected_game_restart_identity(
+        self,
+        result: BattleIdentityCheckResult,
+    ) -> None:
+        """Continue the same battle or route a later one through Attach."""
+
+        claim = getattr(
+            self,
+            "_unexpected_game_restart_reconciliation",
+            None,
+        )
+        if not (
+            isinstance(claim, Mapping)
+            and claim.get("resume_resolved") is True
+            and str(claim.get("operation_id") or "")
+            == str(getattr(self, "_battle_identity_operation_id", "") or "")
+            and result.complete
+            and result.identity is not None
+            and result.relation is not None
+        ):
+            return
+        expected = str(
+            claim.get("expected_identity_fingerprint") or ""
+        ).strip()
+        actual = result.identity.fingerprint
+        relation = result.relation
+        if relation is BattleIdentityRelation.SAME_BATTLE:
+            if not expected or actual != expected:
+                self._unexpected_game_restart_reconciliation = None
+                self._supervisor.pause_for_catastrophic_failure(
+                    RuntimeFailureKind.CONTROL_AUTHORITY_LOST,
+                    reason=(
+                        "forced save relation contradicted the retained "
+                        "Welcome Back battle identity"
+                    ),
+                )
+                return
+            active_battle_observed = getattr(
+                getattr(self, "_mission_mgr", None),
+                "active_battle_observed",
+                None,
+            )
+            already_owned = bool(
+                callable(active_battle_observed)
+                and active_battle_observed() is True
+                and not self._awaiting_initial_battle_intent()
+            )
+            if already_owned:
+                self._unexpected_game_restart_reconciliation = None
+                log(
+                    "[WELCOME_BACK] Forced save confirmed the same managed "
+                    f"battle identity={actual[:16]}; ordinary automation resumed",
+                    "INFO",
+                    console=True,
+                )
+                return
+        elif relation is not BattleIdentityRelation.LATER_BATTLE:
+            self._unexpected_game_restart_reconciliation = None
+            self._supervisor.pause_for_catastrophic_failure(
+                RuntimeFailureKind.CONTROL_AUTHORITY_LOST,
+                reason=(
+                    "Welcome Back forced serialization had no retained "
+                    "battle relation; same-versus-later could not be proven"
+                ),
+            )
+            return
+        elif actual == expected:
+            self._unexpected_game_restart_reconciliation = None
+            self._supervisor.pause_for_catastrophic_failure(
+                RuntimeFailureKind.CONTROL_AUTHORITY_LOST,
+                reason=(
+                    "forced save later-battle relation contradicted the "
+                    "retained Welcome Back identity"
+                ),
+            )
+            return
+
+        current = self._current_control_workflow_evidence()
+        if not (
+            isinstance(current, Mapping)
+            and current.get("game_state") == "active_battle"
+            and current.get("active_round_identity_fingerprint") == actual
+        ):
+            self._unexpected_game_restart_reconciliation = None
+            self._supervisor.pause_for_catastrophic_failure(
+                RuntimeFailureKind.CONTROL_AUTHORITY_LOST,
+                reason=(
+                    "the Welcome Back battle requires Attach, but exact "
+                    "workflow evidence could not be published"
+                ),
+            )
+            return
+        workflow = self._supervisor.request_unexpected_restart_reattachment(
+            evidence=current,
+        )
+        if not isinstance(workflow, Mapping):
+            self._unexpected_game_restart_reconciliation = None
+            self._supervisor.pause_for_catastrophic_failure(
+                RuntimeFailureKind.CONTROL_AUTHORITY_LOST,
+                reason=(
+                    "the Welcome Back battle requires Attach, but its normal "
+                    "workflow could not be created"
+                ),
+            )
+            return
+        self._unexpected_game_restart_reconciliation = None
+        self._rearm_battle_identity_after_home_resume_dispatch()
+        relation_detail = (
+            "same battle on a fresh runtime"
+            if relation is BattleIdentityRelation.SAME_BATTLE
+            else "different battle"
+        )
+        log(
+            f"[WELCOME_BACK] Forced save proved {relation_detail}; requested "
+            f"normal Attach workflow={workflow.get('request_id')} "
+            f"identity={actual[:16]}",
+            "INFO",
+            console=True,
+        )
 
     def _sync_emulator_maintenance_control_boundary(
         self,
@@ -16275,47 +16701,6 @@ class App:
             and workflow.get("status") in {"validating_save", "action_dispatched"}
         ):
             workflow_id = str(workflow.get("request_id") or "")
-            restart_handoff = (
-                self._pending_process_restart_handoff_for_workflow(
-                    workflow_id
-                )
-            )
-            if restart_handoff is not None:
-                expected_identity = str(
-                    restart_handoff.get(
-                        "expected_active_round_identity_fingerprint"
-                    )
-                    or ""
-                ).strip()
-                actual_identity = str(
-                    temporal_binding.active_round_identity_fingerprint or ""
-                ).strip()
-                if not actual_identity or actual_identity != expected_identity:
-                    acknowledgement = dict(current)
-                    if actual_identity:
-                        acknowledgement[
-                            "active_round_identity_fingerprint"
-                        ] = actual_identity
-                    self._mission_mgr.revoke_initial_battle_intent(
-                        "attach_battle",
-                        request_id=workflow_id,
-                    )
-                    self._supervisor.transition_battle_workflow(
-                        workflow_id,
-                        "interrupted",
-                        reason=(
-                            "the forced save proved a different battle than "
-                            "the process-restart handoff"
-                        ),
-                        acknowledgement=acknowledgement,
-                    )
-                    self._fail_process_restart_reattachment(
-                        "the forced save proved a different battle than the "
-                        "one automation owned before Stop",
-                        current=acknowledgement,
-                        workflow_id=workflow_id,
-                    )
-                    return False
             strategy_decision = self._attachment_strategy_decision(
                 workflow,
                 acquisition=acquisition,
@@ -16660,6 +17045,11 @@ class App:
                     ):
                         if self._advance_emulator_recovery(detection, img):
                             continue
+                    if self._advance_unexpected_game_restart_recovery(
+                        detection,
+                        img,
+                    ):
+                        continue
                     self._update_action_authority(
                         detection=detection,
                         holds=(self._blocking_primary_authority_hold(),),
@@ -16672,8 +17062,9 @@ class App:
                         self._free_ticket_recovery_warning_set().add(warning_key)
                         log(
                             "[EMULATOR_RECOVERY] Welcome Back is blocking, but "
-                            "no exact BlueStacks maintenance request owns its "
-                            "buttons; all ordinary input remains suppressed",
+                            "neither exact BlueStacks maintenance nor retained-"
+                            "battle reconciliation owns its buttons; all "
+                            "ordinary input remains suppressed",
                             "WARN",
                             console=True,
                         )

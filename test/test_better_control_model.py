@@ -38,6 +38,7 @@ from core.control_model import (
     intent_matches_evidence,
     observed_game_state,
     ui_reconciliation_receipt_matches_evidence,
+    validate_process_restart_handoff,
     validate_save_reconciliation_receipt,
     validate_workflow_evidence,
 )
@@ -1587,15 +1588,6 @@ def test_process_stop_handoff_binds_one_fresh_same_target_attach(tmp_path):
         observation_id="runtime-2:1",
         runtime_id="runtime-2",
     )
-    with pytest.raises(ValueError, match="no longer matches"):
-        store.request_battle_workflow(
-            "attach_battle",
-            evidence={
-                **replacement,
-                "active_round_identity_fingerprint": "b" * 64,
-            },
-            process_restart_handoff_id=handoff["handoff_id"],
-        )
     workflow = store.request_battle_workflow(
         "attach_battle",
         evidence=replacement,
@@ -1606,15 +1598,6 @@ def test_process_stop_handoff_binds_one_fresh_same_target_attach(tmp_path):
 
     assert workflow["status"] == "requested"
     assert bound["workflow_id"] == workflow["request_id"]
-    with pytest.raises(ValueError, match="expected battle identity"):
-        store.finish_process_restart_handoff(
-            handoff["handoff_id"],
-            "completed",
-            reason="wrong battle",
-            workflow_id=workflow["request_id"],
-            actual_active_round_identity="b" * 64,
-        )
-
     completed = store.finish_process_restart_handoff(
         handoff["handoff_id"],
         "completed",
@@ -1626,6 +1609,51 @@ def test_process_stop_handoff_binds_one_fresh_same_target_attach(tmp_path):
     assert completed is not None
     assert completed["status"] == "completed"
     assert completed["actual_active_round_identity_fingerprint"] == "a" * 64
+    assert completed["battle_relation"] == "same_battle"
+    legacy_completed = dict(completed)
+    legacy_completed.pop("battle_relation")
+    assert validate_process_restart_handoff(legacy_completed)[
+        "battle_relation"
+    ] == "same_battle"
+
+
+def test_process_restart_handoff_adopts_a_force_proven_later_battle(tmp_path):
+    store = ControlDirectiveStore(tmp_path / "automation_ctl.json")
+    source = _evidence(game_state="active_battle")
+    stopped = store.set_state_and_interrupt_operator_workflows(
+        "STOPPED",
+        "replace runtime",
+        source="test-stop",
+        restart_handoff_evidence=source,
+    )
+    handoff = stopped["process_restart_handoff"]
+    store.set_state("PAUSED", source="test-start")
+    replacement = _evidence(
+        game_state="active_battle",
+        observation_id="runtime-2:1",
+        runtime_id="runtime-2",
+    )
+    replacement["active_round_identity_fingerprint"] = "b" * 64
+    workflow = store.request_battle_workflow(
+        "attach_battle",
+        evidence=replacement,
+        process_restart_handoff_id=handoff["handoff_id"],
+    )
+
+    completed = store.finish_process_restart_handoff(
+        handoff["handoff_id"],
+        "completed",
+        reason="later battle force-validated and attached",
+        workflow_id=workflow["request_id"],
+        actual_active_round_identity="b" * 64,
+        battle_relation="later_battle",
+    )
+
+    assert completed is not None
+    assert completed["status"] == "completed"
+    assert completed["expected_active_round_identity_fingerprint"] == "a" * 64
+    assert completed["actual_active_round_identity_fingerprint"] == "b" * 64
+    assert completed["battle_relation"] == "later_battle"
 
 
 def test_new_stop_without_owned_battle_cancels_pending_restart_handoff(tmp_path):
@@ -2667,11 +2695,20 @@ def test_dispatched_start_suspends_timeout_for_known_modal_then_retries_once(
     assert supervisor.battle_workflow["status"] == "action_dispatched"
 
 
-@pytest.mark.parametrize("restart_handoff", (False, True))
-def test_dispatched_resumable_attach_completes_after_same_battle_adoption(
+@pytest.mark.parametrize(
+    ("restart_handoff", "identity_fingerprint", "relation"),
+    (
+        (False, "b" * 64, BattleIdentityRelation.SAME_BATTLE),
+        (True, "b" * 64, BattleIdentityRelation.SAME_BATTLE),
+        (True, "c" * 64, BattleIdentityRelation.LATER_BATTLE),
+    ),
+)
+def test_dispatched_resumable_attach_completes_after_identity_adoption(
     tmp_path,
     monkeypatch,
     restart_handoff,
+    identity_fingerprint,
+    relation,
 ):
     monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
     path = tmp_path / "automation_ctl.json"
@@ -2701,7 +2738,6 @@ def test_dispatched_resumable_attach_completes_after_same_battle_adoption(
         runtime_id=str(owner["runtime_id"]),
     )
     evidence["pid"] = owner["pid"]
-    identity_fingerprint = "b" * 64
     evidence.pop("active_round_identity_fingerprint")
     workflow = store.request_battle_workflow(
         "attach_battle",
@@ -2759,7 +2795,7 @@ def test_dispatched_resumable_attach_completes_after_same_battle_adoption(
     result = SimpleNamespace(
         complete=True,
         identity=SimpleNamespace(fingerprint=identity_fingerprint),
-        relation=BattleIdentityRelation.SAME_BATTLE,
+        relation=relation,
         acquisition=acquisition,
     )
     app._battle_identity_coordinator = MagicMock()
@@ -2767,7 +2803,7 @@ def test_dispatched_resumable_attach_completes_after_same_battle_adoption(
     app._battle_identity_store = MagicMock()
     app._battle_identity_store.active.return_value = None
     app._retained_battle_identity_record = SimpleNamespace(
-        fingerprint=identity_fingerprint
+        fingerprint=("b" * 64 if restart_handoff else identity_fingerprint)
     )
     app._observed_active_round_identity_fingerprint = None
     app._active_round_identity = None
@@ -2834,6 +2870,7 @@ def test_dispatched_resumable_attach_completes_after_same_battle_adoption(
         assert handoff["actual_active_round_identity_fingerprint"] == (
             identity_fingerprint
         )
+        assert handoff["battle_relation"] == relation.value
 
 
 def test_attach_completion_report_failure_never_reclaims_terminal_hold(
@@ -3582,7 +3619,7 @@ def test_empty_projection_cannot_classify_an_attachment_failure(
     assert supervisor.battle_workflow["status"] == "validating_save"
 
 
-def test_restart_reattachment_pauses_when_forced_save_proves_new_battle(
+def test_restart_reattachment_completes_for_force_proven_new_battle(
     tmp_path,
     monkeypatch,
 ):
@@ -3619,43 +3656,24 @@ def test_restart_reattachment_pauses_when_forced_save_proves_new_battle(
         evidence=requested,
     )
     assert workflow is not None
-    for status in ("acknowledged", "validating_save"):
-        store.transition_battle_workflow(
-            workflow["request_id"],
-            status,
-            acknowledgement=requested,
-        )
-    supervisor.apply_control()
     current = {**requested, "active_round_identity_fingerprint": "b" * 64}
     app = App.__new__(App)
     app._supervisor = supervisor
-    app._mission_mgr = MagicMock()
-    app._control_observation = {
-        key: value
-        for key, value in current.items()
-        if key not in {"runtime_id", "pid", "adb_target"}
-    }
-    acquisition, temporal, context = _running_reconciliation_objects(current)
+    app._log_operator_workflow_result = MagicMock()
 
-    completed = app._complete_save_backed_operator_reconciliation(
-        outcome=SimpleNamespace(battle_relation="later_battle"),
-        acquisition=acquisition,
-        temporal_binding=temporal,
-        observations=object(),
-        context=context,
+    completed = app._complete_process_restart_reattachment(
+        workflow,
+        current,
     )
 
-    assert completed is False
-    assert supervisor.is_paused is True
-    assert supervisor.battle_workflow["status"] == "interrupted"
+    assert completed is True
+    assert supervisor.is_paused is False
     handoff = supervisor.process_restart_handoff
     assert handoff is not None
-    assert handoff["status"] == "failed"
+    assert handoff["status"] == "completed"
+    assert handoff["expected_active_round_identity_fingerprint"] == "a" * 64
     assert handoff["actual_active_round_identity_fingerprint"] == "b" * 64
-    app._mission_mgr.revoke_initial_battle_intent.assert_called_once_with(
-        "attach_battle",
-        request_id=workflow["request_id"],
-    )
+    assert handoff["battle_relation"] == "later_battle"
 
 
 def test_empty_projection_cannot_classify_a_return_failure(

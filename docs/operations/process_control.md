@@ -53,8 +53,11 @@ Automation**/**Stop Automation** process actions for that lifecycle. Start
 Automation launches Paused. It waits for explicit battle intent unless the
 preceding complete Stop retained fresh proof of an exact battle automation
 owned. In that case Start creates a fresh Attach, enables only for its guarded
-validation, and completes only after a forced save proves the same battle.
-Different or ended battle evidence leaves Automation Paused.
+validation, and completes only after a forced save identifies the current
+active battle. An equal `ActiveRoundIdentity` reattaches the retained battle; a
+later identity discards old battle-local state and attaches the successor.
+Ended-battle, changed-target, unavailable-proof, or authority/restoration
+failure leaves Automation Paused.
 
 Start Battle is accepted only with fresh verified Home `NEW_BATTLE` evidence;
 Attach to Battle requires fresh Home `RESUME_BATTLE` or active-battle evidence.

@@ -1046,7 +1046,7 @@ def test_process_start_uses_pending_handoff_then_restores_operator_policy(
 
     monkeypatch.setattr(
         service,
-        "_wait_for_same_battle_reattachment",
+        "_wait_for_active_battle_reattachment",
         complete_handoff,
     )
 
@@ -1067,7 +1067,127 @@ def test_process_start_uses_pending_handoff_then_restores_operator_policy(
     assert response["request"]["strategy"] == "tournament"
 
 
-def test_failed_same_battle_start_leaves_replacement_paused(
+def test_process_start_attaches_force_proven_later_battle(
+    tmp_path,
+    monkeypatch,
+):
+    manager = FakeManager()
+    service = _service(tmp_path, manager)
+    source = _write_pending_restart_handoff(service)
+    monkeypatch.setattr(
+        service,
+        "_wait_for_replacement_runtime",
+        lambda **_kwargs: {},
+    )
+
+    def complete_later_battle(*, replacement_pid, handoff_id, expected_identity):
+        replacement = {
+            **source,
+            "runtime_id": "replacement-runtime",
+            "pid": replacement_pid,
+            "observation_id": "replacement-runtime:1",
+            "active_round_identity_fingerprint": "b" * 64,
+        }
+        workflow = service.control_store.request_battle_workflow(
+            "attach_battle",
+            evidence=replacement,
+            process_restart_handoff_id=handoff_id,
+            source="test-replacement",
+        )
+        service.control_store.finish_process_restart_handoff(
+            handoff_id,
+            "completed",
+            reason="later battle force-validated",
+            workflow_id=workflow["request_id"],
+            actual_active_round_identity="b" * 64,
+            battle_relation="later_battle",
+        )
+        assert expected_identity == "a" * 64
+        return {"control": service.control_store.status()}
+
+    monkeypatch.setattr(
+        service,
+        "_wait_for_active_battle_reattachment",
+        complete_later_battle,
+    )
+
+    response = service.apply_process_action({"action": "start"})
+
+    assert service.control_store.status()["state"] == "RUNNING"
+    assert response["request"]["disposition"] == "later_battle_attached"
+    assert response["request"]["battle_identity"] == "b" * 64
+    assert response["request"]["previous_battle_identity"] == "a" * 64
+
+
+def test_process_restart_wait_accepts_completed_later_battle_attach(tmp_path):
+    manager = FakeManager(active=True)
+    service = _service(tmp_path, manager)
+    source = _write_pending_restart_handoff(service)
+    pending = service.control_store.status()["process_restart_handoff"]
+    replacement = {
+        **source,
+        "runtime_id": "replacement-runtime",
+        "pid": manager.pid,
+        "observation_id": "replacement-runtime:1",
+        "active_round_identity_fingerprint": "b" * 64,
+    }
+    workflow = service.control_store.request_battle_workflow(
+        "attach_battle",
+        evidence=replacement,
+        process_restart_handoff_id=pending["handoff_id"],
+        source="test-replacement",
+    )
+    handoff = service.control_store.finish_process_restart_handoff(
+        pending["handoff_id"],
+        "completed",
+        reason="later battle force-validated",
+        workflow_id=workflow["request_id"],
+        actual_active_round_identity="b" * 64,
+        battle_relation="later_battle",
+    )
+    completed_workflow = {
+        **workflow,
+        "status": "completed",
+        "configuration": {
+            "schema_version": 1,
+            "stage": "completed",
+            "reporting_status": "unavailable",
+            "attachment_mode": "observation_only",
+            "degraded": True,
+        },
+    }
+    expected_status = {
+        "process_service": {"active": True, "main_pid": manager.pid},
+        "runtime": {
+            "instances": [
+                {"active": True, "pid": manager.pid},
+            ]
+        },
+        "control": {
+            "process_restart_handoff": handoff,
+            "battle_workflow": completed_workflow,
+        },
+        "control_model": {
+            "observation": {
+                "game_state": "active_battle",
+                "active_round_identity_fingerprint": "b" * 64,
+            },
+            "action_authority": {"effective": "enabled"},
+            "actions": {"manage_active_battle": {"available": True}},
+        },
+    }
+    service.status = lambda: expected_status
+
+    result = service._wait_for_active_battle_reattachment(
+        replacement_pid=manager.pid,
+        handoff_id=pending["handoff_id"],
+        expected_identity="a" * 64,
+    )
+
+    assert result is expected_status
+
+
+def test_failed_active_battle_start_leaves_replacement_paused(
     tmp_path,
     monkeypatch,
 ):
@@ -1080,16 +1200,16 @@ def test_failed_same_battle_start_leaves_replacement_paused(
         lambda **_kwargs: {},
     )
 
-    def reject_different_battle(**_kwargs):
-        raise AutomationProcessError("replacement proved a different battle")
+    def reject_missing_forced_save(**_kwargs):
+        raise AutomationProcessError("replacement forced save was unavailable")
 
     monkeypatch.setattr(
         service,
-        "_wait_for_same_battle_reattachment",
-        reject_different_battle,
+        "_wait_for_active_battle_reattachment",
+        reject_missing_forced_save,
     )
 
-    with pytest.raises(ControlSurfaceRequestError, match="different battle"):
+    with pytest.raises(ControlSurfaceRequestError, match="forced save"):
         service.apply_process_action({"action": "start"})
 
     assert manager.active is True

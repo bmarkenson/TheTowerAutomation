@@ -1838,6 +1838,28 @@ through natural Game Over/Home handling; it does not stop at a notification
 while leaving a known non-resumable run in place. Missing post-input evidence
 is an uncertain result that Pauses without replaying the input.
 
+Welcome Back may also appear after an uncoordinated game-process restart with
+no active `emulator_maintenance` directive. An exact Enabled runtime may claim
+that blocking modal only when the durable battle-identity store retains the
+previous force-proven `ActiveRoundIdentity` and no manual, development, setup,
+validation, or battle workflow owns input. The `battle_identity` authority
+then runs one freshly rematched bounded **Resume** transaction; it never uses
+tier, wave, or modal text as battle identity and has no unowned **End run**
+fallback. Without a pending durable workflow, the first stable `RUNNING` frame
+forces serialization through the ordinary `ActiveBattleIdentityCoordinator`.
+`SAME_BATTLE` continues the already-owned process-local lifecycle, or creates
+the ordinary Attach workflow when a fresh runtime must adopt it.
+`LATER_BATTLE` clears the old battle-local state and creates that same normal
+Attach workflow for the resumed battle; that claim-originated Attach performs
+its existing second exact forced-save validation before adoption. When a
+managed Stop/Start handoff is pending, its fresh Attach instead takes over the
+resolved Welcome Back claim before serialization, then records both the
+retained and actual save IDs plus that same/later relation; it no longer
+rejects a force-proven successor. Missing retained identity, changed
+runtime/target/Enable ownership,
+competing authority, uncertain input, contradictory identity evidence, or an
+unpersistable Attach fails closed without replaying Resume.
+
 BlueStacks Home may expose the configured framebuffer as the exact landscape
 transpose of a supported game resolution (`1920x1080` or `1280x720`). That
 frame is retained as typed native-geometry evidence but is never normalized,
@@ -1932,7 +1954,7 @@ CPH baselines.
   It does not seed their completion variables. Game Over, Tournament Results,
   or Home `NEW_BATTLE` arms the gates, and the next `RUNNING` observation emits
   the normal run-start hooks. Home `RESUME_BATTLE` and transient Unknown states
-  preserve the attachment. Managed same-battle Stop/Start uses `next_run` only
+  preserve the attachment. Managed active-battle Stop/Start uses `next_run` only
   as a transient launch marker when a durable handoff is pending. That runtime
   waits for a fresh Attach rather than treating the retained identity as
   authority, and the normal persisted startup policy is restored immediately.
@@ -1982,7 +2004,7 @@ CPH baselines.
 - Process replacement must verify the existing owner and safe UI boundary,
   then verify the replacement PID, refreshed lock, startup log, control
   consumption, and first state report.
-- The guarded same-battle replacement makes that contract executable across
+- The guarded active-battle replacement makes that contract executable across
   the ordinary complete Stop and later Start calls. Stop records a handoff only
   from a fresh `RUNNING` observation, exact systemd MainPID and held ADB lock,
   force-proven battle identity, and an already owned active-battle lifecycle.
@@ -1991,14 +2013,16 @@ CPH baselines.
   launches once with `next_run`; the persistent next-start policy is restored
   immediately after systemd copies its launch environment. The new runtime
   consumes no old input authority. It creates a normal fresh Attach bound to
-  the new PID and lock, and forced serialization must equal the handoff battle
-  identity before lifecycle adoption and ordinary actions resume. Waves may
-  advance throughout because they do not change that identity. A later or
-  ended battle, changed target, unavailable proof, or reporting failure leaves
-  the replacement Paused and records a terminal handoff result.
+  the new PID and lock. Forced serialization compares the current save identity
+  with the handoff identity before lifecycle adoption and ordinary actions
+  resume. Equality reattaches the retained battle; `LATER_BATTLE` clears its
+  battle-local state and lets that same normal Attach adopt the successor.
+  Waves may advance throughout because they do not change identity. An ended
+  battle, changed target, unavailable proof, or authority/restoration failure
+  leaves the replacement Paused and records a terminal handoff result.
 - Remote lifecycle control is limited to the configured
   `thetower-automation.service` systemd user unit. A start crosses the process
-  boundary under persisted `PAUSED`. Without a same-battle handoff it waits for
+  boundary under persisted `PAUSED`. Without an active-battle handoff it waits for
   explicit intent. With one, the control service publishes `RUNNING` only after
   the replacement unit is active and then waits for the fresh Attach to finish.
   A stop persists `STOPPED` and any eligible exact-battle handoff before systemd

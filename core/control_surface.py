@@ -3939,19 +3939,33 @@ class ControlSurfaceService:
                                     "control-surface-process-restart-reattach"
                                 ),
                             )
-                        self._wait_for_same_battle_reattachment(
-                            replacement_pid=replacement_pid,
-                            handoff_id=str(
-                                restart_handoff.get("handoff_id") or ""
-                            ),
-                            expected_identity=str(
-                                restart_handoff.get(
-                                    "expected_active_round_identity_fingerprint"
-                                )
-                                or ""
-                            ),
+                        reattachment_status = (
+                            self._wait_for_active_battle_reattachment(
+                                replacement_pid=replacement_pid,
+                                handoff_id=str(
+                                    restart_handoff.get("handoff_id") or ""
+                                ),
+                                expected_identity=str(
+                                    restart_handoff.get(
+                                        "expected_active_round_identity_fingerprint"
+                                    )
+                                    or ""
+                                ),
+                            )
                         )
-                        disposition = "same_battle_reattached"
+                        completed_handoff = validate_process_restart_handoff(
+                            (reattachment_status.get("control") or {}).get(
+                                "process_restart_handoff"
+                            )
+                        )
+                        if completed_handoff is not None:
+                            restart_handoff = completed_handoff
+                        disposition = (
+                            "later_battle_attached"
+                            if restart_handoff.get("battle_relation")
+                            == "later_battle"
+                            else "same_battle_reattached"
+                        )
             except (
                 AutomationProcessError,
                 ControlDirectiveError,
@@ -3983,6 +3997,8 @@ class ControlSurfaceService:
             audit = (
                 "Automation service is already live"
                 if disposition == "no_op"
+                else "Started automation and attached to the newly proven battle"
+                if disposition == "later_battle_attached"
                 else "Started automation and reattached to the same battle"
                 if disposition == "same_battle_reattached"
                 else "Started automation service Paused for explicit battle intent"
@@ -4212,16 +4228,29 @@ class ControlSurfaceService:
                 response.get("control_model", {})
                 .get("action_authority", {})
                 .get("effective", "unknown")
-                if disposition in {"no_op", "same_battle_reattached"}
+                if disposition
+                in {
+                    "no_op",
+                    "same_battle_reattached",
+                    "later_battle_attached",
+                }
                 else "paused"
             )
             if automatic_reattachment and restart_handoff is not None:
                 response["request"]["restart_handoff_id"] = (
                     restart_handoff["handoff_id"]
                 )
-                response["request"]["battle_identity"] = restart_handoff[
-                    "expected_active_round_identity_fingerprint"
-                ]
+                response["request"]["battle_identity"] = restart_handoff.get(
+                    "actual_active_round_identity_fingerprint",
+                    restart_handoff[
+                        "expected_active_round_identity_fingerprint"
+                    ],
+                )
+                response["request"]["previous_battle_identity"] = (
+                    restart_handoff[
+                        "expected_active_round_identity_fingerprint"
+                    ]
+                )
         elif action == "stop" and restart_handoff is not None:
             if restart_handoff.get("status") == "pending":
                 response["request"]["reattach_on_start"] = True
@@ -4554,14 +4583,14 @@ class ControlSurfaceService:
                 )
             time.sleep(ATTACHED_RESTART_POLL_SECONDS)
 
-    def _wait_for_same_battle_reattachment(
+    def _wait_for_active_battle_reattachment(
         self,
         *,
         replacement_pid: int,
         handoff_id: str,
         expected_identity: str,
     ) -> dict[str, Any]:
-        """Wait for fresh Attach completion and exact same-battle proof."""
+        """Wait for fresh Attach completion and forced same/later proof."""
 
         deadline = time.monotonic() + ATTACHED_RESTART_TIMEOUT_SECONDS
         last_missing: list[str] = []
@@ -4583,17 +4612,12 @@ class ControlSurfaceService:
                 raise AutomationProcessError(
                     str(
                         handoff.get("reason")
-                        or "same-battle reattachment was rejected"
+                        or "active-battle reattachment was rejected"
                     )
                 )
             actual_identity = str(
                 observation.get("active_round_identity_fingerprint") or ""
             ).strip()
-            if actual_identity and actual_identity != expected_identity:
-                raise AutomationProcessError(
-                    "The replacement runtime proved a different battle; "
-                    "Automation remains Paused"
-                )
             game_state = str(observation.get("game_state") or "unknown")
             if game_state in {
                 "home_new_battle",
@@ -4611,6 +4635,20 @@ class ControlSurfaceService:
                 for instance in runtime.get("instances", [])
             )
             workflow = validate_battle_workflow(control.get("battle_workflow"))
+            handoff_actual_identity = str(
+                (handoff or {}).get(
+                    "actual_active_round_identity_fingerprint"
+                )
+                or ""
+            ).strip()
+            handoff_relation = str(
+                (handoff or {}).get("battle_relation") or ""
+            ).strip()
+            expected_relation = (
+                "same_battle"
+                if handoff_actual_identity == expected_identity
+                else "later_battle"
+            )
             completed = bool(
                 handoff is not None
                 and handoff.get("handoff_id") == handoff_id
@@ -4619,10 +4657,9 @@ class ControlSurfaceService:
                     "expected_active_round_identity_fingerprint"
                 )
                 == expected_identity
-                and handoff.get(
-                    "actual_active_round_identity_fingerprint"
-                )
-                == expected_identity
+                and handoff_actual_identity
+                and handoff_relation == expected_relation
+                and actual_identity == handoff_actual_identity
                 and workflow is not None
                 and workflow.get("request_id") == handoff.get("workflow_id")
                 and workflow.get("status") == "completed"
@@ -4645,7 +4682,7 @@ class ControlSurfaceService:
             if not matching_owner:
                 last_missing.append("replacement ADB lock")
             if not completed:
-                last_missing.append("forced-save same-battle Attach completion")
+                last_missing.append("forced-save active-battle Attach completion")
             if not authority_enabled:
                 last_missing.append("Enabled action authority")
             if not attachment_available:
@@ -4654,7 +4691,7 @@ class ControlSurfaceService:
                 return status
             if time.monotonic() >= deadline:
                 raise AutomationProcessError(
-                    "Replacement remained safe but same-battle reattachment "
+                    "Replacement remained safe but active-battle reattachment "
                     "timed out waiting for: " + ", ".join(last_missing)
                 )
             time.sleep(ATTACHED_RESTART_POLL_SECONDS)
