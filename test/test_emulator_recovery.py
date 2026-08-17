@@ -620,7 +620,7 @@ def test_welcome_back_same_identity_continues_without_attach():
     app._rearm_battle_identity_after_home_resume_dispatch.assert_not_called()
 
 
-def test_welcome_back_same_identity_on_fresh_runtime_routes_attach():
+def test_welcome_back_same_identity_preserves_evidence_until_attach_accepts():
     app = _unexpected_restart_app()
     app._mission_mgr.active_battle_observed.return_value = False
     app._awaiting_initial_battle_intent.return_value = True
@@ -650,6 +650,17 @@ def test_welcome_back_same_identity_on_fresh_runtime_routes_attach():
 
     app._supervisor.request_unexpected_restart_reattachment.assert_called_once_with(
         evidence=evidence,
+    )
+    claim = app._unexpected_game_restart_reconciliation
+    assert claim["attach_workflow_id"] == "attach-same-1"
+    app._rearm_battle_identity_after_home_resume_dispatch.assert_not_called()
+
+    assert app._sync_unexpected_restart_attachment_boundary(
+        {
+            "request_id": "attach-same-1",
+            "intent": "attach_battle",
+            "status": "validating_save",
+        }
     )
     app._rearm_battle_identity_after_home_resume_dispatch.assert_called_once()
     assert app._unexpected_game_restart_reconciliation is None
@@ -684,8 +695,31 @@ def test_welcome_back_later_identity_routes_through_normal_attach():
     app._supervisor.request_unexpected_restart_reattachment.assert_called_once_with(
         evidence=evidence,
     )
-    app._rearm_battle_identity_after_home_resume_dispatch.assert_called_once()
+    app._rearm_battle_identity_after_home_resume_dispatch.assert_not_called()
+    assert app._unexpected_game_restart_reconciliation[
+        "attach_workflow_id"
+    ] == "attach-later-1"
+
+
+def test_welcome_back_attach_terminal_result_releases_local_claim_without_rearm():
+    app = _unexpected_restart_app()
+    app._unexpected_game_restart_reconciliation = {
+        "operation_id": "welcome-back-1",
+        "resume_resolved": True,
+        "expected_identity_fingerprint": ACTIVE_BATTLE_IDENTITY,
+        "attach_workflow_id": "attach-1",
+    }
+
+    assert not app._sync_unexpected_restart_attachment_boundary(
+        {
+            "request_id": "attach-1",
+            "intent": "attach_battle",
+            "status": "rejected",
+        }
+    )
+
     assert app._unexpected_game_restart_reconciliation is None
+    app._rearm_battle_identity_after_home_resume_dispatch.assert_not_called()
 
 
 def test_supervisor_can_create_runtime_welcome_back_attach(tmp_path):

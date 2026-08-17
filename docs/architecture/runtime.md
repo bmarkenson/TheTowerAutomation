@@ -1850,8 +1850,10 @@ forces serialization through the ordinary `ActiveBattleIdentityCoordinator`.
 `SAME_BATTLE` continues the already-owned process-local lifecycle, or creates
 the ordinary Attach workflow when a fresh runtime must adopt it.
 `LATER_BATTLE` clears the old battle-local state and creates that same normal
-Attach workflow for the resumed battle; that claim-originated Attach performs
-its existing second exact forced-save validation before adoption. When a
+Attach workflow for the resumed battle. That claim-originated Attach retains
+the first force-proven ID in its request evidence until the runtime durably
+accepts `validating_save`; only then does it invalidate the local binding and
+perform the existing second exact forced-save validation before adoption. When a
 managed Stop/Start handoff is pending, its fresh Attach instead takes over the
 resolved Welcome Back claim before serialization, then records both the
 retained and actual save IDs plus that same/later relation; it no longer

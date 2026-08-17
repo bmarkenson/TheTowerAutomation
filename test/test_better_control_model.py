@@ -5600,6 +5600,54 @@ def test_enabled_attach_begins_validation_on_first_runtime_sync(
     assert "acknowledged_at" in workflow
 
 
+def test_welcome_back_attach_rearms_identity_after_runtime_acceptance(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("ADB_DEVICE", "localhost:5555")
+    path = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(path)
+    store.set_state("RUNNING", source="test")
+    supervisor = AutomationSupervisor(control_file=str(path))
+    supervisor.apply_control()
+    manager = MissionManager(None, None, await_initial_battle_intent=True)
+    manager.start()
+    owner = supervisor.current_exclusive_validation_owner()
+    evidence = _evidence(
+        game_state="active_battle",
+        runtime_id=str(owner["runtime_id"]),
+    )
+    evidence["pid"] = owner["pid"]
+    workflow = supervisor.request_unexpected_restart_reattachment(
+        evidence=evidence,
+    )
+    assert workflow is not None
+
+    app = App.__new__(App)
+    app._supervisor = supervisor
+    app._mission_mgr = manager
+    app._control_observation = {
+        key: value
+        for key, value in evidence.items()
+        if key not in {"runtime_id", "pid", "adb_target"}
+    }
+    app._unexpected_game_restart_reconciliation = {
+        "operation_id": "welcome-back-1",
+        "resume_resolved": True,
+        "expected_identity_fingerprint": "a" * 64,
+        "attach_workflow_id": workflow["request_id"],
+    }
+    app._rearm_battle_identity_after_home_resume_dispatch = MagicMock()
+
+    app._sync_operator_control_workflows({"state": "RUNNING"})
+
+    accepted = supervisor.battle_workflow
+    assert accepted["status"] == "validating_save"
+    assert accepted["acknowledgement"] == evidence
+    app._rearm_battle_identity_after_home_resume_dispatch.assert_called_once()
+    assert app._unexpected_game_restart_reconciliation is None
+
+
 def test_validated_attach_completes_only_after_lifecycle_adoption(
     tmp_path,
     monkeypatch,

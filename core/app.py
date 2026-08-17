@@ -5760,6 +5760,7 @@ class App:
         workflow = self._supervisor.battle_workflow
         if workflow is None:
             return
+        self._sync_unexpected_restart_attachment_boundary(workflow)
         if workflow.get("status") in {
             "rejected",
             "interrupted",
@@ -5971,6 +5972,7 @@ class App:
                 acknowledgement=current,
             )
             if validating is not None:
+                self._sync_unexpected_restart_attachment_boundary(validating)
                 self._log_operator_workflow_result(
                     request_id,
                     purpose="Attaching automation to a battle",
@@ -9910,6 +9912,53 @@ class App:
             )
         return True
 
+    def _sync_unexpected_restart_attachment_boundary(
+        self,
+        workflow: Mapping[str, Any],
+    ) -> bool:
+        """Re-arm identity only after the Welcome Back Attach is accepted."""
+
+        claim = getattr(
+            self,
+            "_unexpected_game_restart_reconciliation",
+            None,
+        )
+        workflow_id = str(workflow.get("request_id") or "").strip()
+        claimed_workflow_id = str(
+            claim.get("attach_workflow_id")
+            if isinstance(claim, Mapping)
+            else ""
+        ).strip()
+        if not claimed_workflow_id:
+            return False
+        if not (
+            workflow_id == claimed_workflow_id
+            and str(workflow.get("intent") or "") == "attach_battle"
+        ):
+            self._unexpected_game_restart_reconciliation = None
+            return False
+
+        status = str(workflow.get("status") or "")
+        if status in {"validating_save", "action_dispatched"}:
+            # The first post-Resume forced save supplied exact evidence for
+            # the normal Attach request.  Preserve it until Attach durably
+            # accepts that evidence, then invalidate it so the Attach owner
+            # performs its own forced serialization and receives the typed
+            # running-attachment projection.
+            self._unexpected_game_restart_reconciliation = None
+            self._rearm_battle_identity_after_home_resume_dispatch()
+            log(
+                "[WELCOME_BACK] Attach accepted the exact active battle; "
+                "re-armed its forced-save validation "
+                f"workflow={workflow_id}",
+                "INFO",
+                console=True,
+            )
+            return True
+        if status in BATTLE_WORKFLOW_TERMINAL_STATUSES:
+            self._unexpected_game_restart_reconciliation = None
+        return False
+
     def _reconcile_unexpected_game_restart_identity(
         self,
         result: BattleIdentityCheckResult,
@@ -10015,8 +10064,11 @@ class App:
                 ),
             )
             return
-        self._unexpected_game_restart_reconciliation = None
-        self._rearm_battle_identity_after_home_resume_dispatch()
+        retained_claim = dict(claim)
+        retained_claim["attach_workflow_id"] = str(
+            workflow.get("request_id") or ""
+        )
+        self._unexpected_game_restart_reconciliation = retained_claim
         relation_detail = (
             "same battle on a fresh runtime"
             if relation is BattleIdentityRelation.SAME_BATTLE
