@@ -160,6 +160,38 @@ def _snapshot_with_battle_controls() -> PlayerSaveSnapshot:
     )
 
 
+def _snapshot_with_deferred_orb() -> PlayerSaveSnapshot:
+    snapshot = _snapshot()
+    orb = {
+        "range_basis": "30.00m",
+        "extra": "30.00m",
+        "workshop": "39.00m",
+    }
+    return replace(
+        snapshot,
+        validated_checks=(*snapshot.validated_checks, "orb_distance"),
+        checks={
+            **snapshot.checks,
+            "orb_distance": SaveCheckEvidence(
+                "orb_distance",
+                "observed",
+                orb,
+                ("innerOrbDistance", "workshopOrbDistance"),
+                complete=False,
+                reason="Orb Distance requires stable effective Attack Range",
+                authority={
+                    "kind": "exact_values",
+                    "values": [orb],
+                    "deferred_confirmation": {
+                        "kind": "live_attack_range",
+                        "range_basis": "30.00m",
+                    },
+                },
+            ),
+        },
+    )
+
+
 def _context(*, generation: int = 1, strategy: str = "farm_t19"):
     return PlayerSavePreflightContext(
         runtime_session_id="runtime-private",
@@ -624,6 +656,86 @@ def test_exact_battle_controls_are_carried_across_home_and_retry(
         "extra": "30.00m",
         "workshop": "39.00m",
     }
+
+
+def test_home_orb_tuple_is_carried_only_for_live_range_confirmation(
+    monkeypatch,
+):
+    coordinator = _coordinator(
+        monkeypatch,
+        decode_fn=lambda _payload, **_kwargs: _snapshot_with_deferred_orb(),
+    )
+    expected = {
+        "range_basis": "30.00m",
+        "extra": "30.00m",
+        "workshop": "39.00m",
+    }
+
+    result = coordinator.acquire(
+        {
+            "orb_distance": {
+                "mode": "enforce",
+                "resolved": expected,
+            }
+        },
+        initial_frame=object(),
+    )
+
+    assert result.accepted_checks == ()
+    assert result.ui_required_checks == ("orb_distance",)
+    assert result.carry is not None
+    assert result.carry.values == {}
+    assert result.carry.deferred_values == {"orb_distance": expected}
+    assert result.carry.as_dict()["deferred_available_checks"] == [
+        "orb_distance"
+    ]
+    assert coordinator.mark_runtime_launch(
+        control=HomeBattleControl.NEW_BATTLE,
+        action_authorized=True,
+        dispatched=True,
+    )
+    assert coordinator.bind_running(
+        battle_started=True,
+        stable_running=True,
+        continuity_verified=True,
+    )
+    assert coordinator.consume("orb_distance") is None
+    assert coordinator.consume_deferred("orb_distance") == expected
+    assert coordinator.consume_deferred("orb_distance") is None
+    assert result.carry.state is CarriedEvidenceState.CONSUMED
+
+
+def test_deferred_orb_carry_preserves_full_ui_fallback(monkeypatch):
+    coordinator = _coordinator(
+        monkeypatch,
+        decode_fn=lambda _payload, **_kwargs: _snapshot_with_deferred_orb(),
+    )
+    result = coordinator.acquire(
+        {
+            "orb_distance": {
+                "mode": "enforce",
+                "resolved": {
+                    "range_basis": "30.00m",
+                    "extra": "30.00m",
+                    "workshop": "39.00m",
+                },
+            }
+        },
+        initial_frame=object(),
+    )
+    assert result.carry is not None
+
+    coordinator.fallback_checks(
+        "orb_distance_requirement_changed",
+        check_ids=("orb_distance",),
+    )
+
+    assert result.carry.deferred_values == {}
+    assert result.carry.fallback_reasons == {
+        "orb_distance": "orb_distance_requirement_changed"
+    }
+    assert result.carry.state is CarriedEvidenceState.CONSUMED
+    assert coordinator.consume_deferred("orb_distance") is None
 
 
 @pytest.mark.parametrize(

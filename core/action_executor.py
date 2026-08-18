@@ -941,6 +941,17 @@ def execute_actions(
                     if callable(consume_save)
                     else None
                 )
+                consume_deferred_save = getattr(
+                    save_coordinator,
+                    "consume_deferred",
+                    None,
+                )
+                deferred_orb = (
+                    consume_deferred_save("orb_distance")
+                    if carried_orb is None
+                    and callable(consume_deferred_save)
+                    else None
+                )
                 orb_action_valid = mode in {"observe", "enforce"}
                 configured_orb_presets = None
                 try:
@@ -962,6 +973,12 @@ def execute_actions(
                     observed_orb = normalize_orb_distance_preset(carried_orb)
                 except (TypeError, ValueError):
                     observed_orb = None
+                try:
+                    deferred_observed_orb = normalize_orb_distance_preset(
+                        deferred_orb
+                    )
+                except (TypeError, ValueError):
+                    deferred_observed_orb = None
                 expected_orb = requested_orb
                 if observed_orb is not None and configured_orb_presets is not None:
                     expected_orb = next(
@@ -1042,6 +1059,10 @@ def execute_actions(
                             "orb_distance_action_requirement_changed",
                             check_ids=("orb_distance",),
                         )
+                if deferred_observed_orb is not None:
+                    orb_distance_kwargs["save_observation"] = (
+                        deferred_observed_orb
+                    )
                 record_mapping_observation = getattr(
                     save_coordinator,
                     "record_mapping_observation",
@@ -1123,8 +1144,17 @@ def execute_actions(
                     **orb_distance_kwargs,
                 )
                 payload = result.as_dict()
+                used_save_observation = (
+                    result.reason == "matched_from_player_save"
+                )
+                if used_save_observation:
+                    payload["source"] = "bound_player_save_with_live_range"
                 ui_verified = True
-                if result.success and callable(record_ui_verification):
+                if (
+                    result.success
+                    and not used_save_observation
+                    and callable(record_ui_verification)
+                ):
                     ui_verified = (
                         record_ui_verification(
                             "orb_distance",
@@ -1148,8 +1178,14 @@ def execute_actions(
                                 matched=workflow_success,
                                 reason=str(result.reason),
                             )
+                source_detail = (
+                    "source=bound_player_save_with_live_range "
+                    if used_save_observation
+                    else ""
+                )
                 log_mission(
                     "[ORB_DISTANCE] "
+                    f"{source_detail}"
                     f"mode={mode} range={result.range_observed}/"
                     f"{result.range_basis} "
                     f"expected=({result.expected_extra},"

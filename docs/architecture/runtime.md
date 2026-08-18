@@ -101,9 +101,13 @@ Attack Range selects its matching Extra/Workshop pair. That observation may
 come from the guarded UI or from one exact-version save calculation using the
 active total Workshop level, selected/researched Range lab, live Range Card,
 Cannon Module bonuses, native binary32 compression, and display formatting.
-Save evidence is consumable here only with `current_active_round` scope and a
-maxed current Range level; incomplete, mutable, out-of-round, malformed, or
-forward-version evidence retains the UI. A readable Range
+Only `current_active_round` scope with a maxed current Range level can replace
+the Range UI itself. A verified Home save with mutable or out-of-round Range
+may carry one exact configured Orb tuple as conditional evidence across the
+owned launch. The runtime still reads live Range; an equal Range uses that
+saved pair and omits Distance Adjuster, while a difference, invalid tuple,
+forced audit, or continuity failure restores the existing Orb UI route.
+Unreadable Range retains the existing degraded result. A readable Range
 outside that set is preserved as an operator experiment without opening
 Distance Adjuster. Unreadable Range evidence skips that adjustment and is
 retained as degraded validation evidence. Tier 18 Farm binds
@@ -1608,8 +1612,11 @@ warning text in `actions.log`.
   generated preset set. A readable unconfigured Range records
   `unconfigured_range_preserved` and completes without Distance Adjuster input;
   unreadable evidence is flagged and skips Distance Adjuster. For a configured
-  Range, the runtime opens the freshly matched in-run Distance Adjuster, OCRs
-  both values, and matches each direction arrow immediately before one tap. Every step
+  Range, an exact tuple deferred from the owned Home save completes the check
+  without opening Distance Adjuster only when its Range and both values equal
+  the selected preset. Otherwise the runtime opens the freshly matched in-run
+  Distance Adjuster, OCRs both values, and matches each direction arrow
+  immediately before one tap. Every step
   reacquires the panel, requires the selected row to move strictly closer to
   its target, and stops on unknown, unchanged, cycling, or non-progressing
   evidence. An unavailable arrow or unchanged value closes the automatically

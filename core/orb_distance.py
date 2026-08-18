@@ -106,10 +106,21 @@ class OrbDistanceResult:
 def _finish_orb_distance(result: OrbDistanceResult) -> OrbDistanceResult:
     """Emit the terminal operator result for one Orb Distance workflow."""
 
+    source = (
+        "player_save_with_live_range"
+        if result.reason == "matched_from_player_save"
+        else "ui"
+    )
     if result.preserved:
         summary = (
             "Orb Distance check complete — preserved unconfigured Attack Range "
             f"{result.range_observed}"
+        )
+    elif result.reason == "matched_from_player_save":
+        summary = (
+            "Orb Distance check complete — saved Extra "
+            f"{result.final_extra} and Workshop {result.final_workshop} "
+            f"verified against live Range {result.range_observed}"
         )
     elif result.mode == "observe" and result.observed and result.dismissed:
         if result.matches:
@@ -148,7 +159,7 @@ def _finish_orb_distance(result: OrbDistanceResult) -> OrbDistanceResult:
             f"final_extra={result.final_extra} final_workshop={result.final_workshop} "
             f"changed={result.changed} extra_steps={result.extra_steps} "
             f"workshop_steps={result.workshop_steps} dismissed={result.dismissed} "
-            f"preserved={result.preserved}"
+            f"preserved={result.preserved} source={source}"
         ),
     )
     return result
@@ -558,6 +569,7 @@ def configure_orb_distance(
     extra: Any,
     workshop: Any,
     range_presets: Any = None,
+    save_observation: Any = None,
     mode: str = "enforce",
     capture_fn: CaptureFn = capture_adb_screenshot,
     tap_visible_fn: Callable[..., bool] = tap_if_visible,
@@ -592,6 +604,14 @@ def configure_orb_distance(
         if range_presets is not None
         else None
     )
+    try:
+        saved = (
+            normalize_orb_distance_preset(save_observation)
+            if save_observation is not None
+            else None
+        )
+    except (TypeError, ValueError):
+        saved = None
     if canonical_mode == "observe":
         log_action_intent(
             "Checking Orb Distance for the observed Attack Range",
@@ -712,6 +732,37 @@ def configure_orb_distance(
             f"{range_reading.distance} selected preset "
             f"Extra {expected['extra']} / Workshop {expected['workshop']}",
             "DEBUG",
+        )
+
+    if (
+        saved is not None
+        and saved["range_basis"] == range_reading.distance
+        and saved == expected
+    ):
+        result_values.update(
+            initial_extra=saved["extra"],
+            initial_workshop=saved["workshop"],
+            final_extra=saved["extra"],
+            final_workshop=saved["workshop"],
+            observed=True,
+            matches=True,
+            dismissed=True,
+            reason="matched_from_player_save",
+        )
+        log(
+            "[ORB_DISTANCE] Saved Orb values match the selected preset for "
+            f"live Attack Range {range_reading.distance}; Distance Adjuster "
+            "inspection omitted",
+            "INFO",
+        )
+        return _finish_orb_distance(
+            OrbDistanceResult(
+                mode=canonical_mode,
+                range_basis=expected["range_basis"],
+                expected_extra=expected["extra"],
+                expected_workshop=expected["workshop"],
+                **result_values,
+            )
         )
 
     panel_opened = False

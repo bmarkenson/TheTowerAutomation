@@ -839,6 +839,29 @@ def reconcile_requirements(
             str(check_id) in {"modules", "damage_slider", "orb_distance"}
             and check_policy == "observe"
         )
+        deferred_confirmation: Optional[dict[str, Any]] = None
+        evidence_deferred = (
+            evidence.authority.get("deferred_confirmation")
+            if evidence is not None
+            else None
+        )
+        if (
+            str(check_id) == "orb_distance"
+            and not force_ui_audit
+            and snapshot_trusted
+            and evidence is not None
+            and evidence.status == "observed"
+            and evidence.complete is False
+            and check_validated
+            and requirement_supported
+            and matches is True
+            and isinstance(evidence_deferred, Mapping)
+            and evidence_deferred.get("kind") == "live_attack_range"
+            and isinstance(observed, Mapping)
+            and evidence_deferred.get("range_basis")
+            == observed.get("range_basis")
+        ):
+            deferred_confirmation = dict(evidence_deferred)
 
         if force_ui_audit:
             disposition = SAVE_UI_REQUIRED_DISPOSITION
@@ -901,6 +924,7 @@ def reconcile_requirements(
             ),
             "save_check_validated": check_validated,
             "save_requirement_supported": requirement_supported,
+            "deferred_confirmation": deferred_confirmation,
             "diagnostics": _check_diagnostics(
                 str(check_id),
                 expected_value,
@@ -3457,31 +3481,34 @@ def _orb_distance_evidence(
             reason="Orb Distance mapping values are malformed",
         )
 
+    range_observed = bool(
+        attack_range.status == "observed" and attack_range.value
+    )
     range_complete = bool(
-        attack_range.status == "observed"
+        range_observed
         and attack_range.complete
         and attack_range.stable
-        and attack_range.value
         and attack_range.scope == "current_active_round"
     )
-    if not range_complete:
+    range_reason = (
+        "Orb Distance requires stable effective Attack Range: "
+        + (
+            attack_range.reason
+            or (
+                "range scope is not current_active_round"
+                if attack_range.scope != "current_active_round"
+                else "range evidence incomplete"
+            )
+        )
+    )
+    if not range_observed:
         return SaveCheckEvidence(
             check_id="orb_distance",
             status="unmapped",
             value=None,
             source_fields=evidence_source_fields,
             complete=False,
-            reason=(
-                "Orb Distance requires stable effective Attack Range: "
-                + (
-                    attack_range.reason
-                    or (
-                        "range scope is not current_active_round"
-                        if attack_range.scope != "current_active_round"
-                        else "range evidence incomplete"
-                    )
-                )
-            ),
+            reason=range_reason,
             authority={
                 "kind": "exact_values",
                 "values": semantic_values,
@@ -3519,6 +3546,27 @@ def _orb_distance_evidence(
             ):
                 matched_values.append(semantic)
     observed = matched_values[0] if len(matched_values) == 1 else None
+    authority = {
+        "kind": "exact_values",
+        "values": semantic_values,
+        "raw_float_tolerance": raw_float_tolerance,
+        "attack_range": dict(attack_range.authority),
+    }
+    if observed is not None and not range_complete:
+        authority["deferred_confirmation"] = {
+            "kind": "live_attack_range",
+            "range_basis": observed["range_basis"],
+        }
+        return SaveCheckEvidence(
+            check_id="orb_distance",
+            status="observed",
+            value=observed,
+            source_fields=evidence_source_fields,
+            complete=False,
+            reason=range_reason,
+            authority=authority,
+        )
+
     complete = observed is not None
     return SaveCheckEvidence(
         check_id="orb_distance",
@@ -3537,12 +3585,7 @@ def _orb_distance_evidence(
                 "outside the mapped raw tolerance"
             )
         ),
-        authority={
-            "kind": "exact_values",
-            "values": semantic_values,
-            "raw_float_tolerance": raw_float_tolerance,
-            "attack_range": dict(attack_range.authority),
-        },
+        authority=authority,
         diagnostics=(
             {}
             if complete

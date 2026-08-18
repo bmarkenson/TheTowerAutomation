@@ -151,11 +151,13 @@ class CarriedPlayerSaveEvidence:
     snapshot_fingerprint: str
     effective_mapping_fingerprint: str
     values: dict[str, Any]
+    deferred_values: dict[str, Any] = field(default_factory=dict)
     state: CarriedEvidenceState = CarriedEvidenceState.PENDING_LAUNCH
     launch_kind: str = "home_new_battle"
     source_activity_scope_id: str = field(default="", repr=False)
     battle_started_observed: bool = False
     consumed: set[str] = field(default_factory=set)
+    deferred_consumed: set[str] = field(default_factory=set)
     fallback_reasons: dict[str, str] = field(default_factory=dict)
     invalidation_reason: str = ""
 
@@ -237,17 +239,53 @@ class CarriedPlayerSaveEvidence:
             return None
         self.consumed.add(normalized)
         value = self.values[normalized]
-        if self.consumed == set(self.values):
-            self.state = CarriedEvidenceState.CONSUMED
+        self._finish_if_consumed()
         return value
+
+    def consume_deferred(
+        self,
+        check_id: str,
+        context: PlayerSavePreflightContext,
+    ) -> Any:
+        """Consume evidence that still requires its named live confirmation."""
+
+        normalized = str(check_id)
+        if (
+            self.state is CarriedEvidenceState.BOUND_RUNNING
+            and not self.context.matches(context)
+        ):
+            self.invalidate("carried_evidence_context_changed")
+            return None
+        if (
+            self.state is not CarriedEvidenceState.BOUND_RUNNING
+            or normalized in self.deferred_consumed
+            or normalized not in self.deferred_values
+        ):
+            return None
+        self.deferred_consumed.add(normalized)
+        value = self.deferred_values[normalized]
+        self._finish_if_consumed()
+        return value
+
+    def _finish_if_consumed(self) -> None:
+        if not (set(self.values) - self.consumed) and not (
+            set(self.deferred_values) - self.deferred_consumed
+        ):
+            self.state = CarriedEvidenceState.CONSUMED
 
     def reject_checks(self, check_ids: tuple[str, ...], reason: str) -> None:
         """Route only changed requirements to UI without distrusting the save."""
 
         normalized_reason = str(reason or "check_requires_ui_fallback")
         for check_id in {str(value) for value in check_ids}:
+            rejected = False
             if check_id in self.values:
                 self.values.pop(check_id, None)
+                rejected = True
+            if check_id in self.deferred_values:
+                self.deferred_values.pop(check_id, None)
+                rejected = True
+            if rejected:
                 self.fallback_reasons[check_id] = normalized_reason
         if (
             self.state not in {
@@ -255,6 +293,7 @@ class CarriedPlayerSaveEvidence:
                 CarriedEvidenceState.CONSUMED,
             }
             and not (set(self.values) - self.consumed)
+            and not (set(self.deferred_values) - self.deferred_consumed)
         ):
             self.state = CarriedEvidenceState.CONSUMED
 
@@ -265,6 +304,7 @@ class CarriedPlayerSaveEvidence:
         }:
             return
         self.values.clear()
+        self.deferred_values.clear()
         self.state = CarriedEvidenceState.INVALIDATED
         self.invalidation_reason = str(reason or "continuity_invalidated")
 
@@ -281,7 +321,7 @@ class CarriedPlayerSaveEvidence:
 
     def as_dict(self) -> dict[str, Any]:
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "state": self.state.value,
             "provenance": self.context.redacted(),
             "snapshot_fingerprint": self.snapshot_fingerprint,
@@ -298,6 +338,10 @@ class CarriedPlayerSaveEvidence:
             },
             "available_checks": sorted(set(self.values) - self.consumed),
             "consumed_checks": sorted(self.consumed),
+            "deferred_available_checks": sorted(
+                set(self.deferred_values) - self.deferred_consumed
+            ),
+            "deferred_consumed_checks": sorted(self.deferred_consumed),
             "fallback_checks": dict(sorted(self.fallback_reasons.items())),
             "invalidation_reason": self.invalidation_reason,
         }
@@ -395,6 +439,30 @@ def normalize_player_save_preflight_mode(value: Any) -> str:
             "force_ui, or comparison_audit"
         )
     return mode
+
+
+def _deferred_carry_values(
+    decisions: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Return exact values whose remaining authority is one live Range read."""
+
+    values: dict[str, Any] = {}
+    for check_id, decision in decisions.items():
+        confirmation = decision.get("deferred_confirmation")
+        observed = decision.get("observed")
+        if (
+            check_id not in CARRIED_SAVE_CHECKS
+            or decision.get("disposition") != "ui_required"
+            or decision.get("ui_required") is not True
+            or not isinstance(confirmation, Mapping)
+            or confirmation.get("kind") != "live_attack_range"
+            or not isinstance(observed, Mapping)
+            or confirmation.get("range_basis")
+            != observed.get("range_basis")
+        ):
+            continue
+        values[str(check_id)] = observed
+    return values
 
 
 class PlayerSavePreflightCoordinator:
@@ -701,7 +769,8 @@ class PlayerSavePreflightCoordinator:
                 if check_id in CARRIED_SAVE_CHECKS
                 and decision.get("disposition") in SAVE_ACCEPTED_DISPOSITIONS
             }
-            if values:
+            deferred_values = _deferred_carry_values(decisions)
+            if values or deferred_values:
                 carry = CarriedPlayerSaveEvidence(
                     context=context,
                     snapshot_fingerprint=str(
@@ -711,6 +780,7 @@ class PlayerSavePreflightCoordinator:
                         snapshot.effective_mapping_fingerprint or ""
                     ),
                     values=values,
+                    deferred_values=deferred_values,
                 )
                 self._carry = carry
         return self._ready_result(
@@ -827,7 +897,8 @@ class PlayerSavePreflightCoordinator:
                 if check_id in CARRIED_SAVE_CHECKS
                 and decision.get("disposition") in SAVE_ACCEPTED_DISPOSITIONS
             }
-            if values:
+            deferred_values = _deferred_carry_values(decisions)
+            if values or deferred_values:
                 carry = CarriedPlayerSaveEvidence(
                     context=context,
                     snapshot_fingerprint=str(provenance["source_fingerprint"]),
@@ -836,6 +907,7 @@ class PlayerSavePreflightCoordinator:
                         or ""
                     ),
                     values=values,
+                    deferred_values=deferred_values,
                     state=CarriedEvidenceState.LAUNCH_DISPATCHED,
                     launch_kind="game_over_direct_retry",
                     source_activity_scope_id=str(source_activity_scope_id),
@@ -922,7 +994,10 @@ class PlayerSavePreflightCoordinator:
         carry = self._carry
         if carry is None:
             return []
-        return sorted(set(carry.values) - carry.consumed)
+        return sorted(
+            (set(carry.values) - carry.consumed)
+            | (set(carry.deferred_values) - carry.deferred_consumed)
+        )
 
     def invalidate(
         self,
@@ -1268,6 +1343,22 @@ class PlayerSavePreflightCoordinator:
             )
         return value
 
+    def consume_deferred(self, check_id: str) -> Any:
+        carry = self._carry
+        if carry is None:
+            return None
+        try:
+            value = carry.consume_deferred(check_id, self._context_fn())
+        except Exception:
+            return None
+        if value is not None:
+            log(
+                "[PLAYER_SAVE_PREFLIGHT] Consumed carried evidence requiring "
+                f"live confirmation for {check_id}",
+                "INFO",
+            )
+        return value
+
     def _same_context(self, expected: PlayerSavePreflightContext) -> bool:
         try:
             return expected.matches(self._context_fn())
@@ -1382,6 +1473,11 @@ class PlayerSavePreflightCoordinator:
             context=context,
         )
         for check_id, decision in sorted(decisions.items()):
+            deferred_detail = (
+                "deferred_confirmation=True "
+                if decision.get("deferred_confirmation")
+                else ""
+            )
             log(
                 "[PLAYER_SAVE_PREFLIGHT] "
                 f"check={check_id} mapping={decision.get('mapping_id') or 'none'} "
@@ -1389,6 +1485,7 @@ class PlayerSavePreflightCoordinator:
                 f"{bool(decision.get('save_evidence_complete'))} "
                 "supported="
                 f"{bool(decision.get('save_requirement_supported'))} "
+                f"{deferred_detail}"
                 f"disposition={decision.get('disposition') or 'ui_required'} "
                 f"reason={decision.get('reason') or 'unspecified'}",
                 "INFO",

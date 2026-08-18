@@ -779,6 +779,78 @@ def test_orb_carry_uses_preset_for_observed_range_without_opening_ui():
     assert observation["source"] == "bound_player_save_preflight"
 
 
+def test_deferred_orb_save_is_passed_for_live_range_confirmation():
+    expected = {
+        "range_basis": "30.00m",
+        "extra": "30.00m",
+        "workshop": "39.00m",
+    }
+    ui_verifications = []
+
+    class BoundSave:
+        def consume(self, check_id):
+            assert check_id == "orb_distance"
+            return None
+
+        def consume_deferred(self, check_id):
+            assert check_id == "orb_distance"
+            return expected
+
+        def record_ui_verification(self, check_id, *, changed):
+            ui_verifications.append((check_id, changed))
+            return True
+
+    result = OrbDistanceResult(
+        mode="enforce",
+        range_basis="30.00m",
+        range_observed="30.00m",
+        expected_extra="30.00m",
+        expected_workshop="39.00m",
+        initial_extra="30.00m",
+        initial_workshop="39.00m",
+        final_extra="30.00m",
+        final_workshop="39.00m",
+        observed=True,
+        matches=True,
+        changed=False,
+        extra_steps=0,
+        workshop_steps=0,
+        dismissed=True,
+        reason="matched_from_player_save",
+    )
+    ctx = MissionContext(
+        data={
+            "mission_vars": {"last_detection_state": "RUNNING"},
+            "player_save_preflight_coordinator": BoundSave(),
+        }
+    )
+
+    with patch(
+        "core.action_executor.configure_orb_distance",
+        return_value=result,
+    ) as configure:
+        execute_actions(
+            None,
+            [
+                {
+                    "type": "orb_distance_configure",
+                    "mode": "enforce",
+                    **expected,
+                }
+            ],
+            ctx,
+            action_guard_fn=lambda: True,
+        )
+
+    kwargs = configure.call_args.kwargs
+    assert kwargs["save_observation"] == expected
+    assert kwargs["range_basis"] == "30.00m"
+    assert ui_verifications == []
+    observation = ctx.data["mission_vars"]["orb_distance_observation"]
+    assert observation["source"] == "bound_player_save_with_live_range"
+    assert ctx.data["mission_vars"]["orb_distance_checked"] is True
+
+
 def test_orb_ui_calibration_records_only_real_orb_save_fields():
     mapping_observations = []
 

@@ -265,6 +265,70 @@ def test_orb_distance_already_at_target_sends_no_arrow_tap():
     assert taps == []
 
 
+def test_matching_saved_orb_values_skip_distance_adjuster_after_live_range():
+    saved = {
+        "range_basis": "30.00m",
+        "extra": "30.00m",
+        "workshop": "39.00m",
+    }
+    with patch("core.orb_distance.open_orb_distance") as open_panel:
+        result = configure_orb_distance(
+            range_basis="30m",
+            extra="30m",
+            workshop="39m",
+            save_observation=saved,
+            read_range_fn=lambda **_kwargs: _range("30.00m"),
+            tap_visible_fn=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("matching saved Orb values must not tap")
+            ),
+            sleep_fn=lambda _seconds: None,
+        )
+
+    assert result.success
+    assert result.reason == "matched_from_player_save"
+    assert result.range_observed == "30.00m"
+    assert result.final_extra == "30.00m"
+    assert result.final_workshop == "39.00m"
+    assert not result.changed
+    open_panel.assert_not_called()
+
+
+def test_saved_orb_range_mismatch_uses_complete_distance_adjuster_path():
+    presets = [
+        {
+            "range_basis": "30.00m",
+            "extra": "30.00m",
+            "workshop": "39.00m",
+        },
+        {
+            "range_basis": "98.38m",
+            "extra": "87.16m",
+            "workshop": "80.37m",
+        },
+    ]
+    with (
+        patch(
+            "core.orb_distance.open_orb_distance",
+            return_value=_reading("87.16m", "80.37m"),
+        ) as open_panel,
+        patch("core.orb_distance.dismiss_orb_distance", return_value=True),
+    ):
+        result = configure_orb_distance(
+            range_basis="30m",
+            extra="30m",
+            workshop="39m",
+            range_presets=presets,
+            save_observation=presets[0],
+            read_range_fn=lambda **_kwargs: _range("98.38m"),
+            sleep_fn=lambda _seconds: None,
+        )
+
+    assert result.success
+    assert result.reason == "matched"
+    assert result.range_basis == "98.38m"
+    open_panel.assert_called_once()
+
+
 def test_orb_distance_observes_initial_value_and_invalidates_before_repair():
     events = []
     with (
