@@ -36,6 +36,9 @@ public sealed class ControlSurfaceCompatibilityTests
 
         Assert.False(result.IsCompatible);
         Assert.Contains("better_control_model_v2", result.MissingCapabilities);
+        Assert.Contains(
+            "active_battle_screen_metrics_v1",
+            result.MissingCapabilities);
         Assert.Contains("active_run_metrics_v1", result.MissingCapabilities);
         Assert.Contains("current_battle_perks_v1", result.MissingCapabilities);
         Assert.Contains(
@@ -336,8 +339,34 @@ public sealed class ControlSurfaceCompatibilityTests
             """
             {
               "api_version": 1,
-              "server_revision": 47,
+              "server_revision": 48,
               "control_model": {
+                "observation": {
+                  "available": true,
+                  "observation_id": "runtime-1:12",
+                  "observed_at": "2026-08-17T20:01:15+00:00",
+                  "game_state": "active_battle",
+                  "active_battle": true,
+                  "wave": 4323,
+                  "age_seconds": 2,
+                  "active_round_identity_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                },
+                "active_battle_screen_metrics": {
+                  "schema_version": 1,
+                  "active_round_identity_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "wave": {
+                    "value": 4323,
+                    "observation_id": "runtime-1:12",
+                    "observed_at": "2026-08-17T20:01:15+00:00",
+                    "age_seconds": 2
+                  },
+                  "coins_per_minute": {
+                    "value": "1.23T",
+                    "observation_id": "runtime-1:periodic-7",
+                    "observed_at": "2026-08-17T20:00:00+00:00",
+                    "age_seconds": 75
+                  }
+                },
                 "active_run_metrics": {
                   "schema_version": 1,
                   "status": "partial",
@@ -375,6 +404,22 @@ public sealed class ControlSurfaceCompatibilityTests
         Assert.Equal("1250.5", metrics.WholeRun?.WavesPerHour);
         Assert.Equal("4.984", metrics.WholeRun?.EffectiveGameSpeed);
         Assert.Equal("1810000000000000000", metrics.Interval?.CoinsPerHour);
+        var controlModel = response!.ControlModel;
+        Assert.NotNull(controlModel);
+        Assert.Equal(4323, controlModel!.Observation.Wave);
+        Assert.True(controlModel.Observation.ActiveBattle);
+        Assert.Equal(2, controlModel.Observation.AgeSeconds);
+        Assert.Equal(
+            4323,
+            controlModel.ActiveBattleScreenMetrics?.Wave?.Value);
+        Assert.Equal(
+            "1.23T",
+            controlModel.ActiveBattleScreenMetrics
+                ?.CoinsPerMinute?.Value);
+        Assert.Equal(
+            75,
+            controlModel.ActiveBattleScreenMetrics
+                ?.CoinsPerMinute?.AgeSeconds);
     }
 
     [Fact]
@@ -444,6 +489,7 @@ public sealed class ControlSurfaceCompatibilityTests
         var compatible = ControlSurfaceCompatibility.Evaluate(
             Status(
                 ControlSurfaceCompatibility.MinimumServerRevision,
+                "active_battle_screen_metrics_v1",
                 "active_battle_strategy_adoption",
                 "active_run_metrics_v1",
                 "advisory_preflight_decisions",

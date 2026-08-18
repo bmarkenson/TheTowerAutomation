@@ -3542,6 +3542,8 @@ class PausedStartupObservationTests(unittest.TestCase):
             wave=1,
             wave_conf=99.0,
             allow_actions=False,
+            active_round_identity_fingerprint=None,
+            observation_id=app._control_observation["observation_id"],
         )
 
         manager.tick.assert_not_called()
@@ -3628,6 +3630,8 @@ class PausedStartupObservationTests(unittest.TestCase):
             wave=1,
             wave_conf=99.0,
             allow_actions=False,
+            active_round_identity_fingerprint=None,
+            observation_id=app._control_observation["observation_id"],
         )
 
     def test_legacy_terminal_block_is_released_for_normal_automation(self):
@@ -3753,6 +3757,8 @@ class PausedStartupObservationTests(unittest.TestCase):
             wave=1,
             wave_conf=99.0,
             allow_actions=False,
+            active_round_identity_fingerprint="a" * 64,
+            observation_id=app._control_observation["observation_id"],
         )
 
     def test_read_only_status_reporting_does_not_refresh_coin_display(self):
@@ -3959,7 +3965,7 @@ class PausedStartupObservationTests(unittest.TestCase):
                         confidence=96.5,
                     ),
                 ),
-                patch("core.status_report.log_status"),
+                patch("core.status_report.log_status") as status_log,
             ):
                 reporter.maybe_report(
                     img=frame,
@@ -3971,6 +3977,21 @@ class PausedStartupObservationTests(unittest.TestCase):
                     wave_conf=99.0,
                     now_ts=1_700_000_000.0,
                     allow_actions=False,
+                    active_round_identity_fingerprint="a" * 64,
+                    observation_id="runtime-1:321",
+                )
+                reporter.maybe_report(
+                    img=frame,
+                    ui_state="RUNNING",
+                    menu=None,
+                    secondary=set(),
+                    overlays=set(),
+                    wave=322,
+                    wave_conf=99.0,
+                    now_ts=1_700_000_000.5,
+                    allow_actions=False,
+                    active_round_identity_fingerprint="a" * 64,
+                    observation_id="runtime-1:322",
                 )
         finally:
             AUTOMATION.state = original_state
@@ -3984,8 +4005,16 @@ class PausedStartupObservationTests(unittest.TestCase):
         assert sample["confidence"] == 98.5
         assert sample["game_speed"] == 5.0
         assert sample["game_speed_confidence"] == 96.5
+        assert reporter.latest_coin_rate_observation == {
+            "active_round_identity_fingerprint": "a" * 64,
+            "observation_id": "runtime-1:321",
+            "observed_at": sample["captured_at"],
+            "value": "1.23M",
+        }
+        status_log.assert_called_once()
         reporter.reset_coin_rate_samples()
         assert reporter.coin_rate_samples == []
+        assert reporter.latest_coin_rate_observation is None
 
 
 if __name__ == "__main__":

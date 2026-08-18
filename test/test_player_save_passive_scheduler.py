@@ -442,7 +442,7 @@ def test_app_fans_one_passive_bundle_to_perks_metrics_and_optional_audit():
     )
 
 
-def test_app_projects_only_the_current_economy_checkpoint_for_live_status():
+def test_app_projects_current_economy_checkpoint_off_battle_screen():
     app = App.__new__(App)
     context = _context()
     monitor = Mock()
@@ -480,7 +480,7 @@ def test_app_projects_only_the_current_economy_checkpoint_for_live_status():
     app._current_player_save_observation_context = Mock(return_value=context)
     app._control_observation = {
         "active_battle": True,
-        "game_state": "active_battle",
+        "game_state": "unknown",
         "active_round_identity_fingerprint": (
             context.active_round_identity_fingerprint
         ),
@@ -502,6 +502,74 @@ def test_app_projects_only_the_current_economy_checkpoint_for_live_status():
     }
     monitor.latest_summary.assert_called_once_with(context)
     assert monitor.method_calls == [call.latest_summary(context)]
+
+
+def test_app_projects_retained_screen_metrics_off_battle_screen():
+    app = App.__new__(App)
+    context = _context()
+    app._current_player_save_observation_context = Mock(return_value=context)
+    app._control_observation = {
+        "observation_id": "runtime-1:12",
+        "active_battle": True,
+        "game_state": "unknown",
+        "active_round_identity_fingerprint": (
+            context.active_round_identity_fingerprint
+        ),
+    }
+    app._last_active_battle_wave_observation = {
+        "active_round_identity_fingerprint": (
+            context.active_round_identity_fingerprint
+        ),
+        "observation_id": "runtime-1:10",
+        "observed_at": "2026-08-17T20:00:00+00:00",
+        "value": 4321,
+    }
+    app._status_reporter = SimpleNamespace(
+        latest_coin_rate_observation={
+            "active_round_identity_fingerprint": (
+                context.active_round_identity_fingerprint
+            ),
+            "observation_id": "runtime-1:9",
+            "observed_at": "2026-08-17T19:59:30+00:00",
+            "value": "1.23T",
+        }
+    )
+
+    assert app._active_battle_screen_metric_status() == {
+        "schema_version": 1,
+        "active_round_identity_fingerprint": "a" * 64,
+        "wave": {
+            "observation_id": "runtime-1:10",
+            "observed_at": "2026-08-17T20:00:00+00:00",
+            "value": 4321,
+        },
+        "coins_per_minute": {
+            "observation_id": "runtime-1:9",
+            "observed_at": "2026-08-17T19:59:30+00:00",
+            "value": "1.23T",
+        },
+    }
+
+
+def test_app_hides_retained_screen_metrics_after_battle_identity_changes():
+    app = App.__new__(App)
+    context = _context()
+    app._current_player_save_observation_context = Mock(return_value=context)
+    app._control_observation = {
+        "active_battle": True,
+        "active_round_identity_fingerprint": "b" * 64,
+    }
+    app._last_active_battle_wave_observation = {
+        "active_round_identity_fingerprint": "a" * 64,
+        "observation_id": "runtime-1:10",
+        "observed_at": "2026-08-17T20:00:00+00:00",
+        "value": 4321,
+    }
+    app._status_reporter = SimpleNamespace(
+        latest_coin_rate_observation=None,
+    )
+
+    assert app._active_battle_screen_metric_status() is None
 
 
 def test_app_clears_rates_when_newest_checkpoint_sources_are_ambiguous():

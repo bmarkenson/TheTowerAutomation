@@ -1017,12 +1017,14 @@ short alias-based row and an exact itemized expansion without changing the
 durable `RESULT` message. Older bundles without structured item metadata still
 receive a compact count when their paired detail remains in the log tail.
 
-The periodic operator heartbeat contains state, wave, and Coins/min. Its paired
-`[STATUS_DETAIL]` diagnostic retains menu, secondary-state, and overlay
-evidence. Until the planned atomic runtime snapshot replaces log-derived live
-status, the Linux adapter accepts both this paired format and the earlier
-all-in-one `STATUS` format so existing log tails remain usable across an
-upgrade. The GUI presents only the latest status and a prior meaningful
+The human-readable operator `STATUS` summary remains intentionally periodic so
+the durable log is not flooded. It contains state, wave, Coins/min, and speed;
+its paired `[STATUS_DETAIL]` diagnostic retains menu, secondary-state, and
+overlay evidence. Live status does not wait for that log cadence: each
+main-loop frame accepted at the canonical observation boundary publishes a
+fresh structured observation in the atomic runtime-owned snapshot. The Linux
+adapter still accepts both the paired and earlier all-in-one `STATUS` formats
+for retained history. The GUI presents only the latest summary and a prior meaningful
 transition outside the Operational activity list while retaining complete
 status history in `Status only` and `All levels`.
 
@@ -1390,13 +1392,23 @@ Process request examples:
   Strategy separately; the latest completed battle remains useful as a compact
   one-line summary when its detail is collapsed.
 - The global status derives run elapsed only from the published current-run
-  activity-scope start and the atomic server timestamp. Wave and Coins/min are
-  absent outside a fresh active-battle observation instead of presenting stale
-  values or placeholder dashes. This elapsed value is presentation only and
-  never establishes battle identity or authority. Server revision 47 and
-  `active_run_metrics_v1` add the latest accepted save-backed checkpoint to the
-  same runtime-owned snapshot. The native status row shows whole-run realized
-  CPH, recent CPH from the latest compatible save-checkpoint interval,
+  activity-scope start and the atomic server timestamp. `SCREEN AGE` is the age
+  of the latest canonical main-loop observation, not the periodic log summary,
+  Windows polling interval, or a promised next screenshot. Wave OCR runs on
+  each canonical `RUNNING` frame. A miss, or a temporary non-battle screen in
+  the same exact active round, retains the last proven Wave with a muted `*`;
+  Wave is never extrapolated. Coins/min remains an independently periodic OCR
+  sample and is carried in each later structured snapshot; it receives the
+  same `*` while the current screen is off-battle. Tooltips give the source and
+  Linux-server-derived age without adding another status column. Extra helper
+  captures inside handlers are not canonical observations and do not move
+  `SCREEN AGE` or create a misleading next-capture countdown. These values are
+  presentation only and never establish battle identity or authority. Server
+  revision 48 and `active_battle_screen_metrics_v1` own this screen-metric
+  projection; `active_run_metrics_v1` owns the latest accepted save-backed
+  checkpoint in the same runtime snapshot. The native status row shows
+  whole-run realized CPH, recent CPH from the latest compatible
+  save-checkpoint interval,
   whole-run cells/hour, waves/hour, effective speed, and compact checkpoint
   wave and server-derived age. Nonstandard semantic status remains visible. It
   never converts OCR Coins/min into CPH. Polling reads only the
@@ -1404,10 +1416,12 @@ Process request examples:
   or forced write and does not change the independent passive cadence. The
   runtime projection, authority snapshot, and structured observation must all
   carry the same forced-save active-round identity, and every displayed rate
-  must belong to the newest single-source checkpoint. The server clears the
-  projection outside that fresh exact-owner boundary; the native client also
-  clears it on a failed status poll. Partial or conflicted checkpoints omit
-  rates they do not currently prove. Expected duration, active Peak Coins/min,
+  must belong to the newest single-source checkpoint. Temporary navigation
+  away from the battle screen does not clear either projection while fresh
+  exact-owner evidence still proves that same active round. The server clears
+  them on owner, freshness, active-round, or identity loss; the native client
+  also clears them on a failed status poll. Partial or conflicted checkpoints
+  omit rates they do not currently prove. Expected duration, active Peak Coins/min,
   expected-versus-observed requirement detail, recovery countdowns, and
   Return/Extend/Cancel recovery actions remain absent until their owning
   runtime status fields and guarded directives exist.
@@ -1420,7 +1434,8 @@ Process request examples:
   pending/acknowledged/rejected/interrupted state comes from Linux, not local
   GUI inference. Start Automation always leaves actions Paused. This contract
   was introduced in server revision 30; the current client requires revision
-  47 plus `active_run_metrics_v1`, `better_control_model_v2`,
+  48 plus `active_battle_screen_metrics_v1`, `active_run_metrics_v1`,
+  `better_control_model_v2`,
   `runtime_control_acknowledgements_v1`,
   `strategy_aware_attach_v1`,
   `bluestacks_maintenance_v2`, `bluestacks_operator_restart_v1`, and
@@ -1625,11 +1640,11 @@ coordination contract is defined in
 These are the next useful additions, in approximate priority order:
 
 1. Extend the existing atomic runtime-owned authority/control snapshot with the
-   remaining live-view fields: wave, compact UI detail, active handler, and
-   last error. Observation identity/time, battle identity, Strategy scope,
-   action gate, startup policy, and exact control receipts already use this
-   channel in revision 37 and must not regress to action-log authority. The
-   extension will replace the remaining log-derived heartbeat presentation.
+   remaining live-view fields: compact UI detail, active handler, and last
+   error. Observation identity/time, battle identity, Wave, retained
+   Coins/min, Strategy scope, action gate, startup policy, and exact control
+   receipts already use this channel and must not regress to action-log
+   authority.
 2. Add recovery-timer controls such as extend, cancel, and return-now only after
    those operations have explicit runtime directives and freshness/authority
    checks. The GUI must not implement them as direct taps.

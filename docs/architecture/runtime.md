@@ -873,6 +873,18 @@ the periodic guard restores the selected target. Selecting a new target in the
 control surface re-arms the guard immediately and records its approximate wave
 in the target timeline.
 
+Each main-loop frame accepted at the canonical observation boundary publishes
+one structured observation with its own ID and timestamp in the atomic runtime
+authority snapshot. Wave OCR is attempted on every canonical `RUNNING` frame,
+and the latest exact-round success is retained across a later OCR miss or temporary
+off-battle screen; the runtime never predicts Wave from elapsed time. The
+periodic `StatusReporter` still controls human-readable `STATUS` log volume and
+Coins/min OCR, including its guarded coin-display recovery behavior. Its latest
+accepted Coins/min value, timestamp, and source observation are projected into
+subsequent per-frame snapshots without rerunning that OCR. Handler-specific
+recaptures are action-local evidence rather than new canonical observations,
+so there is no single truthful next-screenshot deadline to publish.
+
 Automatic-Perk profiles maintain a run-scoped selection timeline from the
 compact `current wave / next Perk wave` control. A scheduled pair is usable
 only when the next wave is later than the current wave and no more than 250
@@ -1359,8 +1371,11 @@ for continued battle retry.
   condition evidence in their Markdown view.
 - Periodic valid Coins/min readings are stored as bounded numeric samples with
   their timestamp, wave, and OCR confidence, then attached to the completed
-  record. The runtime does not maintain a separate per-run Coins CSV or toggle
-  the live display to collect scheduled lifetime-total snapshots.
+  record. The latest accepted display value separately carries exact-round
+  observation provenance into the live structured status projection; this
+  does not change the periodic log/OCR cadence. The runtime does not maintain a
+  separate per-run Coins CSV or toggle the live display to collect
+  scheduled lifetime-total snapshots.
 - Routine terminal screenshots are not durable artifacts. The handlers retain
   source frames only when capture, parsing, persistence, or validation fails or
   remains uncertain. Historical screenshots may remain as evidence, but new

@@ -580,6 +580,9 @@ class App:
         self._last_wave_value: Optional[int] = None
         self._last_wave_conf: float = -1.0
         self._last_wave_ts: float = 0.0
+        self._last_active_battle_wave_observation: Optional[
+            dict[str, object]
+        ] = None
         self._battle_activation_tracker = BattleActivationTracker()
         self._player_save_audit_collector = None
         try:
@@ -3301,6 +3304,9 @@ class App:
                 "observation": copy.deepcopy(
                     getattr(self, "_control_observation", None)
                 ),
+                "active_battle_screen_metrics": (
+                    self._active_battle_screen_metric_status()
+                ),
                 "active_run_performance": (
                     self._active_run_performance_evidence(current_strategy)
                 ),
@@ -3410,6 +3416,54 @@ class App:
         except (TypeError, ValueError):
             return None
 
+    def _active_battle_screen_metric_status(self) -> Optional[dict[str, Any]]:
+        """Publish retained screen facts bound to the exact active battle."""
+
+        context = self._current_player_save_observation_context()
+        observation = getattr(self, "_control_observation", None)
+        if not (
+            context is not None
+            and isinstance(observation, Mapping)
+            and observation.get("active_battle") is True
+            and observation.get("active_round_identity_fingerprint")
+            == context.active_round_identity_fingerprint
+        ):
+            return None
+
+        identity = context.active_round_identity_fingerprint
+        wave = getattr(
+            self,
+            "_last_active_battle_wave_observation",
+            None,
+        )
+        def metric_status(value: object) -> Optional[dict[str, object]]:
+            if not (
+                isinstance(value, Mapping)
+                and value.get("active_round_identity_fingerprint") == identity
+            ):
+                return None
+            return {
+                field: copy.deepcopy(value.get(field))
+                for field in ("observation_id", "observed_at", "value")
+            }
+
+        wave_status = metric_status(wave)
+        reporter = getattr(self, "_status_reporter", None)
+        latest_coin = getattr(
+            reporter,
+            "latest_coin_rate_observation",
+            None,
+        )
+        coin_status = metric_status(latest_coin)
+        if wave_status is None and coin_status is None:
+            return None
+        return {
+            "schema_version": 1,
+            "active_round_identity_fingerprint": identity,
+            "wave": wave_status,
+            "coins_per_minute": coin_status,
+        }
+
     def _active_run_metric_status(self) -> Optional[dict[str, Any]]:
         """Publish the latest passive save checkpoint for operator display."""
 
@@ -3423,7 +3477,6 @@ class App:
         if not (
             isinstance(observation, Mapping)
             and observation.get("active_battle") is True
-            and observation.get("game_state") == "active_battle"
             and observation.get("active_round_identity_fingerprint")
             == context.active_round_identity_fingerprint
         ):
@@ -3533,6 +3586,8 @@ class App:
     def _record_control_observation(
         self,
         detection: Mapping[str, Any],
+        *,
+        observed_wave: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Bind one passive game observation to this runtime and ADB target."""
 
@@ -3597,13 +3652,59 @@ class App:
             ),
             "target_generation": target_generation,
         }
+        if (
+            state == "RUNNING"
+            and isinstance(observed_wave, int)
+            and not isinstance(observed_wave, bool)
+            and 0 <= observed_wave <= 2_147_483_647
+        ):
+            observation["wave"] = observed_wave
         self._prior_control_observation = getattr(
             self,
             "_control_observation",
             None,
         )
         self._control_observation = observation
+        self._remember_active_battle_wave(observation)
         return dict(observation)
+
+    def _remember_active_battle_wave(
+        self,
+        observation: Mapping[str, Any],
+    ) -> None:
+        """Retain one exact-round Wave OCR observation across temporary screens."""
+
+        if observation.get("active_battle") is not True:
+            self._last_active_battle_wave_observation = None
+            return
+        identity = str(
+            observation.get("active_round_identity_fingerprint") or ""
+        ).strip()
+        current = getattr(
+            self,
+            "_last_active_battle_wave_observation",
+            None,
+        )
+        if (
+            isinstance(current, Mapping)
+            and current.get("active_round_identity_fingerprint") != identity
+        ):
+            self._last_active_battle_wave_observation = None
+        wave = observation.get("wave")
+        if not (
+            identity
+            and observation.get("game_state") == "active_battle"
+            and isinstance(wave, int)
+            and not isinstance(wave, bool)
+            and 0 <= wave <= 2_147_483_647
+        ):
+            return
+        self._last_active_battle_wave_observation = {
+            "active_round_identity_fingerprint": identity,
+            "observation_id": observation.get("observation_id"),
+            "observed_at": observation.get("observed_at"),
+            "value": wave,
+        }
 
     def _bind_forced_identity_to_control_observation(
         self,
@@ -3624,6 +3725,7 @@ class App:
         bound = dict(observation)
         bound["active_round_identity_fingerprint"] = identity
         self._control_observation = bound
+        self._remember_active_battle_wave(bound)
         return True
 
     def _yield_on_unexpected_manual_activity(self) -> bool:
@@ -17190,6 +17292,15 @@ class App:
                     continue
 
                 detection = detect_state_and_overlays(img, log_matches=self._match_trace)
+                frame_wave_val: Optional[int] = None
+                frame_wave_conf: float = -1.0
+                if detection.get("state") == "RUNNING":
+                    try:
+                        frame_wave_val, frame_wave_conf = (
+                            detect_wave_number_from_image(img)
+                        )
+                    except Exception:
+                        frame_wave_val, frame_wave_conf = None, -1.0
                 game_speed_guard = getattr(self, "_game_speed_guard", None)
                 if game_speed_guard is not None:
                     game_speed_guard.set_target(
@@ -17211,7 +17322,10 @@ class App:
                     # continuity can interpret a manually started successor.
                     time.sleep(1.0)
                     continue
-                self._record_control_observation(detection)
+                self._record_control_observation(
+                    detection,
+                    observed_wave=frame_wave_val,
+                )
                 self._observe_blocking_primary_boundary(detection)
                 self._setup_capture_source_refreshed = False
                 detected_state = str(
@@ -17885,13 +17999,8 @@ class App:
                     # before any handler consumes the pre-route frame.
                     continue
 
-                wave_val: Optional[int] = None
-                wave_conf: float = -1.0
-                if detection.get("state") == "RUNNING":
-                    try:
-                        wave_val, wave_conf = detect_wave_number_from_image(img)
-                    except Exception:
-                        wave_val, wave_conf = None, -1.0
+                wave_val = frame_wave_val
+                wave_conf = frame_wave_conf
 
                 if wave_val is not None:
                     self._last_wave_value = wave_val
@@ -18005,6 +18114,24 @@ class App:
                     allow_actions=(
                         strategy_action_allowed
                         and self._handler_enabled("coin_display")
+                    ),
+                    active_round_identity_fingerprint=(
+                        self._control_observation.get(
+                            "active_round_identity_fingerprint"
+                        )
+                        if isinstance(
+                            getattr(self, "_control_observation", None),
+                            Mapping,
+                        )
+                        else None
+                    ),
+                    observation_id=(
+                        self._control_observation.get("observation_id")
+                        if isinstance(
+                            getattr(self, "_control_observation", None),
+                            Mapping,
+                        )
+                        else None
                     ),
                 )
                 if self._handler_enabled("event_mission_warnings"):

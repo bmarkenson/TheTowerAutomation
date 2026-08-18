@@ -2604,6 +2604,7 @@ public partial class MainWindow : Window
             && _controlSurfaceServiceState is { IsActive: false } serviceState
             && serviceState.ActiveState is "inactive" or "failed")
         {
+            ClearBattleScreenMetrics();
             ClearActiveRunMetrics();
             SetHttpConnectionStatus(
                 serviceState.ActiveState == "failed"
@@ -2649,6 +2650,7 @@ public partial class MainWindow : Window
         }
         catch (OperationCanceledException)
         {
+            ClearBattleScreenMetrics();
             ClearActiveRunMetrics();
             if (!force)
             {
@@ -2659,6 +2661,7 @@ public partial class MainWindow : Window
         }
         catch (Exception exc)
         {
+            ClearBattleScreenMetrics();
             ClearActiveRunMetrics();
             var serviceStopped = _controlSurfaceServiceState is
                 { IsActive: false, ActiveState: "inactive" };
@@ -3191,13 +3194,6 @@ public partial class MainWindow : Window
         ObservedStateText.Text = status.ControlModel?.Observation.Available == true
             ? FormatStatusToken(status.ControlModel.Observation.GameState)
             : FormatGameScreen(status.Observation?.StateLabel);
-        WaveText.Text = status.Observation?.Wave?.ToString(CultureInfo.InvariantCulture) ?? "-";
-        CoinsMinuteText.Text = status.Observation?.CoinsPerMinute ?? "-";
-        HeartbeatText.Text = status.Observation is null
-            ? "Missing"
-            : status.Observation.Stale
-                ? $"Stale ({FormatAge(status.Observation.AgeSeconds)})"
-                : $"Fresh ({FormatAge(status.Observation.AgeSeconds)})";
         PriorTransitionText.Text = status.PriorTransition is null
             ? "No earlier state transition in the current log tail"
             : FormatObservation(status.PriorTransition);
@@ -3249,32 +3245,21 @@ public partial class MainWindow : Window
         var lifecycleAvailable = service?.Available == true;
         var processActive = service?.Active == true || status.Runtime.Active;
         var controlObservation = status.ControlModel?.Observation;
-        var structuredBattleObservationActive = controlObservation is
-            { Available: true, GameState: "active_battle" };
+        var sameBattleObservationAvailable = controlObservation is
+            { Available: true, ActiveBattle: true };
         var observedRoundIdentity =
             controlObservation?.ActiveRoundIdentityFingerprint;
-        var battleObservationActive = status.Observation is { Stale: false }
-            && (structuredBattleObservationActive
-                || (status.ControlModel is null
-                    && string.Equals(
-                        status.Observation.StateLabel,
-                        "RUNNING",
-                        StringComparison.OrdinalIgnoreCase)));
-        WaveMetricPanel.Visibility = processActive
-            && battleObservationActive
-            && status.Observation?.Wave is not null
-                ? Visibility.Visible
-                : Visibility.Collapsed;
-        CoinsMinuteMetricPanel.Visibility = processActive
-            && battleObservationActive
-            && !string.IsNullOrWhiteSpace(status.Observation?.CoinsPerMinute)
-                ? Visibility.Visible
-                : Visibility.Collapsed;
+        RenderBattleScreenMetrics(
+            BattleScreenMetricPresenter.Present(
+                status.ControlModel?.ActiveBattleScreenMetrics,
+                controlObservation,
+                processActive),
+            status.Observation);
         RenderActiveRunMetrics(
             ActiveRunMetricPresenter.Present(
                 status.ControlModel?.ActiveRunMetrics,
                 observedRoundIdentity,
-                processActive && structuredBattleObservationActive));
+                processActive && sameBattleObservationAvailable));
         var runElapsed = FormatRunElapsed(
             status.CurrentRun,
             status.ServerTime);
@@ -5257,6 +5242,48 @@ public partial class MainWindow : Window
             ? Visibility.Collapsed
             : Visibility.Visible;
     }
+
+    private void RenderBattleScreenMetrics(
+        BattleScreenMetricPresentation presentation,
+        ObservationStatus? periodicSummary)
+    {
+        WaveText.Text = presentation.Wave ?? "";
+        WaveText.Foreground = presentation.WaveRetained
+            ? (Brush)FindResource("MutedBrush")
+            : Foreground;
+        WaveMetricPanel.ToolTip = presentation.WaveDetail;
+        WaveMetricPanel.Visibility = presentation.Wave is null
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+
+        CoinsMinuteText.Text = presentation.CoinsPerMinute ?? "";
+        CoinsMinuteText.Foreground = presentation.CoinsPerMinuteRetained
+            ? (Brush)FindResource("MutedBrush")
+            : Foreground;
+        CoinsMinuteMetricPanel.ToolTip = presentation.CoinsPerMinuteDetail;
+        CoinsMinuteMetricPanel.Visibility = presentation.CoinsPerMinute is null
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+
+        ScreenAgeText.Text = presentation.ScreenAge;
+        ScreenAgeText.Foreground = presentation.ScreenObservationFresh
+            ? Foreground
+            : (Brush)FindResource("MutedBrush");
+        var periodicDetail = periodicSummary?.AgeSeconds is >= 0
+            ? $" Human-readable status summary: {FormatAge(periodicSummary.AgeSeconds)} ago"
+                + " (intentionally sparse log cadence)."
+            : "";
+        ScreenAgeMetricPanel.ToolTip = presentation.ScreenAgeDetail
+            + periodicDetail;
+    }
+
+    private void ClearBattleScreenMetrics() =>
+        RenderBattleScreenMetrics(
+            BattleScreenMetricPresenter.Present(
+                null,
+                observation: null,
+                processActive: false),
+            periodicSummary: null);
 
     private void ClearActiveRunMetrics() =>
         RenderActiveRunMetrics(

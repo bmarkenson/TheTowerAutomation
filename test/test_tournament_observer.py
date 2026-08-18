@@ -648,6 +648,8 @@ def test_tournament_main_loop_keeps_status_and_recovery_read_only():
         wave=1800,
         wave_conf=99.0,
         allow_actions=False,
+        active_round_identity_fingerprint="a" * 64,
+        observation_id=app._control_observation["observation_id"],
     )
     start_tapper.assert_not_called()
 

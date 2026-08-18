@@ -214,6 +214,11 @@ def validate_observation(value: object) -> Optional[dict[str, Any]]:
         type(target_generation) is not int or target_generation < 0
     ):
         return None
+    wave = value.get("wave")
+    if wave is not None and (
+        type(wave) is not int or not 0 <= wave <= 2_147_483_647
+    ):
+        return None
     # Activity scope is log/report segmentation only.  Malformed optional
     # metadata must never discard otherwise valid runtime authority evidence.
     scope = _optional_bounded(value.get("activity_scope_run_id"), 128)
@@ -239,6 +244,8 @@ def validate_observation(value: object) -> Optional[dict[str, Any]]:
         normalized["active_round_identity_fingerprint"] = str(
             active_round_identity
         )
+    if wave is not None:
+        normalized["wave"] = wave
     return normalized
 
 
@@ -263,6 +270,8 @@ def workflow_evidence_from_authority(
     observation = validate_observation(runtime_model.get("observation"))
     if observation is None:
         return None
+    # Wave is display evidence, not an input-authority or workflow binding.
+    observation.pop("wave", None)
     runtime_id = _bounded(owner.get("runtime_id"), 128)
     adb_target = _bounded(owner.get("adb_target"), 128)
     try:
@@ -300,6 +309,8 @@ def validate_workflow_evidence(value: object) -> Optional[dict[str, Any]]:
         or observation is None
     ):
         return None
+    # Persisted workflow evidence remains stable as the same battle advances.
+    observation.pop("wave", None)
     return {
         "schema_version": 1,
         "runtime_id": runtime_id,

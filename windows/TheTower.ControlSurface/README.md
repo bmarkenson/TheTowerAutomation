@@ -299,10 +299,18 @@ written to either settings file.
 The status band shows run elapsed only when a managed process and a valid
 current activity scope are both present. It calculates that value from the
 scope's published start and the same response's Linux server timestamp, not
-from Activity prose or the Windows clock. Wave and Coins/min disappear outside
-a fresh active-battle observation. During a fresh exact-owner active battle, a
-third row, aligned to the status columns above it, shows the latest accepted
-save checkpoint's whole-run realized CPH, recent CPH from the two latest
+from Activity prose or the Windows clock. **Screen Age** is the age of the
+latest canonical main-loop screen observation. It is not the sparse log
+summary age, the five-second Windows polling interval, or a countdown to the
+next screenshot. Wave is read from every canonical Running frame and is never
+advanced from timing alone. On a Wave OCR miss or a temporary off-battle
+screen in the same exact round, the last proven value remains visible with a
+muted `*`. Coins/min keeps its independent periodic OCR cadence and receives
+the same marker while off-screen; each field's tooltip gives its source and
+age. Handler-specific recaptures do not update Screen Age. During a fresh
+exact-owner active battle, a third row, aligned to the status columns above it,
+shows the latest accepted save checkpoint's whole-run realized CPH, recent CPH
+from the two latest
 compatible save checkpoints, whole-run cells/hour, waves/hour, and effective
 speed, followed by compact checkpoint wave and Linux-server-derived age.
 Semantic status remains in the checkpoint detail and joins the compact value
@@ -311,9 +319,11 @@ when it is not the normal `Observed` state. These fields reuse passive
 status polling never acquires or forces a save and never turns OCR Coins/min
 into realized CPH. The metric projection, authority snapshot, and structured
 observation must carry the same forced-save round identity, and its rates must
-come from one newest save source. An identity or source mismatch, process or
-authority loss, or failed status poll clears the row. A partial or conflicted
-checkpoint clears each unproved rate instead of retaining its older value. No
+come from one newest save source. Temporary same-battle screen navigation does
+not clear the screen or save projections. An identity or source mismatch,
+process or authority loss, battle end, or failed status poll clears them. A
+partial or conflicted checkpoint clears each unproved rate instead of retaining
+its older value. No
 expected duration, Peak Coins/min, requirement comparison, recovery countdown,
 or Return/Extend/Cancel recovery control is synthesized before a versioned
 status field and guarded runtime directive own it.
@@ -344,7 +354,7 @@ Authority**, observed **Game Screen**, **Strategy Scope**, and **When This
 Battle Ends**. For example, a stopped process remains `Stopped` even when a
 saved next-start directive exists; the requested directive is shown separately
 from effective authority. A second row retains Wave, Coins/min, target versus
-observed speed, and heartbeat freshness. During `RUNNING`, **Observed Speed**
+observed speed, and canonical **Screen Age**. During `RUNNING`, **Observed Speed**
 uses up to three fresh frames: the initial OCR attempt plus two bounded
 retries. `OCR missed` means all three lacked a trustworthy reading, not that
 the target or save-derived effective speed is unknown. Outside a running
@@ -1113,7 +1123,8 @@ supported capabilities. The Windows build carries an expected API version, a
 minimum server revision, and required capabilities. Any mismatch produces a
 prominent full-width **Linux API update required** banner, disables dependent
 actions, and gives disabled Start buttons the same blocker in a tooltip. The
-current Windows build requires revision 47, `active_run_metrics_v1`,
+current Windows build requires revision 48,
+`active_battle_screen_metrics_v1`, `active_run_metrics_v1`,
 `current_battle_perks_v1`, `better_control_model_v2`,
 `runtime_control_acknowledgements_v1`,
 `strategy_aware_attach_v1`,

@@ -844,6 +844,9 @@ public sealed class BetterControlModelStatus
     [JsonPropertyName("observation")]
     public BetterControlObservationStatus Observation { get; set; } = new();
 
+    [JsonPropertyName("active_battle_screen_metrics")]
+    public ActiveBattleScreenMetricStatus? ActiveBattleScreenMetrics { get; set; }
+
     [JsonPropertyName("active_run_metrics")]
     public ActiveRunMetricStatus? ActiveRunMetrics { get; set; }
 
@@ -914,6 +917,51 @@ public sealed class ActiveRunRates
     public string? EffectiveGameSpeed { get; set; }
 }
 
+public sealed class ActiveBattleScreenMetricStatus
+{
+    [JsonPropertyName("schema_version")]
+    public int SchemaVersion { get; set; }
+
+    [JsonPropertyName("active_round_identity_fingerprint")]
+    public string? ActiveRoundIdentityFingerprint { get; set; }
+
+    [JsonPropertyName("wave")]
+    public ActiveBattleWaveMetricStatus? Wave { get; set; }
+
+    [JsonPropertyName("coins_per_minute")]
+    public ActiveBattleTextMetricStatus? CoinsPerMinute { get; set; }
+}
+
+public sealed class ActiveBattleWaveMetricStatus
+{
+    [JsonPropertyName("value")]
+    public int Value { get; set; }
+
+    [JsonPropertyName("observation_id")]
+    public string ObservationId { get; set; } = "";
+
+    [JsonPropertyName("observed_at")]
+    public string? ObservedAt { get; set; }
+
+    [JsonPropertyName("age_seconds")]
+    public int? AgeSeconds { get; set; }
+}
+
+public sealed class ActiveBattleTextMetricStatus
+{
+    [JsonPropertyName("value")]
+    public string Value { get; set; } = "";
+
+    [JsonPropertyName("observation_id")]
+    public string ObservationId { get; set; } = "";
+
+    [JsonPropertyName("observed_at")]
+    public string? ObservedAt { get; set; }
+
+    [JsonPropertyName("age_seconds")]
+    public int? AgeSeconds { get; set; }
+}
+
 public sealed class BetterControlProcessStatus
 {
     [JsonPropertyName("state")]
@@ -940,14 +988,29 @@ public sealed class BetterControlObservationStatus
     [JsonPropertyName("available")]
     public bool Available { get; set; }
 
+    [JsonPropertyName("observation_id")]
+    public string ObservationId { get; set; } = "";
+
+    [JsonPropertyName("observed_at")]
+    public string? ObservedAt { get; set; }
+
     [JsonPropertyName("game_state")]
     public string GameState { get; set; } = "unknown";
+
+    [JsonPropertyName("active_battle")]
+    public bool ActiveBattle { get; set; }
+
+    [JsonPropertyName("wave")]
+    public int? Wave { get; set; }
 
     [JsonPropertyName("freshness")]
     public string Freshness { get; set; } = "unavailable";
 
     [JsonPropertyName("reason")]
     public string Reason { get; set; } = "";
+
+    [JsonPropertyName("age_seconds")]
+    public int? AgeSeconds { get; set; }
 
     [JsonPropertyName("active_round_identity_fingerprint")]
     public string? ActiveRoundIdentityFingerprint { get; set; }

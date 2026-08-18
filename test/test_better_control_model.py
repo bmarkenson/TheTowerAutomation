@@ -1396,6 +1396,42 @@ def test_first_terminal_frame_records_the_canonical_battle_identity():
     assert observation["active_round_identity_fingerprint"] == "a" * 64
 
 
+def test_control_observation_retains_wave_across_same_battle_screen_change():
+    app = App.__new__(App)
+    app._active_round_identity_fingerprint = "a" * 64
+    app._terminal_round_identity_fingerprint = None
+    app._control_observation_sequence = 0
+    app._current_run_scope_id = lambda: "report-scope"
+    app._observe_battle_authority_precondition = MagicMock(return_value=True)
+    app._supervisor = MagicMock()
+    app._supervisor.current_exclusive_validation_owner.return_value = {
+        "runtime_id": "runtime-1",
+    }
+    app._adb_target_session = MagicMock()
+    app._adb_target_session.snapshot.return_value = SimpleNamespace(
+        owned=True,
+        generation=7,
+    )
+
+    running = app._record_control_observation(
+        {"state": "RUNNING"},
+        observed_wave=4321,
+    )
+    offscreen = app._record_control_observation({"state": "UNKNOWN"})
+
+    assert running["wave"] == 4321
+    assert running["observation_id"] == "runtime-1:1"
+    assert offscreen["game_state"] == "unknown"
+    assert offscreen["active_battle"] is True
+    assert "wave" not in offscreen
+    assert app._last_active_battle_wave_observation == {
+        "active_round_identity_fingerprint": "a" * 64,
+        "observation_id": "runtime-1:1",
+        "observed_at": running["observed_at"],
+        "value": 4321,
+    }
+
+
 @pytest.mark.parametrize(
     ("field", "replacement", "reason"),
     (

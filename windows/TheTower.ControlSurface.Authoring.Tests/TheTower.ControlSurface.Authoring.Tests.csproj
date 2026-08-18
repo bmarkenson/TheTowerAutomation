@@ -19,6 +19,8 @@
              Link="ApiClient.cs" />
     <Compile Include="..\TheTower.ControlSurface\ActiveRunMetricPresenter.cs"
              Link="ActiveRunMetricPresenter.cs" />
+    <Compile Include="..\TheTower.ControlSurface\BattleScreenMetricPresenter.cs"
+             Link="BattleScreenMetricPresenter.cs" />
     <Compile Include="..\TheTower.ControlSurface\BlueStacksInstanceController.cs"
              Link="BlueStacksInstanceController.cs" />
     <Compile Include="..\TheTower.ControlSurface\BlueStacksMaintenanceCoordinator.cs"

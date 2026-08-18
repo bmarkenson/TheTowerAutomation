@@ -104,6 +104,7 @@ class StatusReporter:
         self._last_status_ts: float = 0.0
         self._game_speed_ocr_misses = 0
         self._coin_rate_samples: list[dict[str, object]] = []
+        self._latest_coin_rate_observation: Optional[dict[str, object]] = None
 
     @property
     def coin_rate_samples(self) -> list[dict[str, object]]:
@@ -111,10 +112,21 @@ class StatusReporter:
 
         return [dict(sample) for sample in self._coin_rate_samples]
 
+    @property
+    def latest_coin_rate_observation(self) -> Optional[dict[str, object]]:
+        """Return the latest exact-battle Coins/min sample for live status."""
+
+        return (
+            dict(self._latest_coin_rate_observation)
+            if self._latest_coin_rate_observation is not None
+            else None
+        )
+
     def reset_coin_rate_samples(self) -> None:
         """Start a fresh rate history after an authoritative run boundary."""
 
         self._coin_rate_samples.clear()
+        self._latest_coin_rate_observation = None
 
     def request_immediate_report(self) -> None:
         """Make the next captured frame publish a fresh status observation."""
@@ -134,6 +146,8 @@ class StatusReporter:
         wave_conf: float,
         now_ts: Optional[float] = None,
         allow_actions: bool = True,
+        active_round_identity_fingerprint: Optional[str] = None,
+        observation_id: Optional[str] = None,
     ) -> None:
         if self._interval == 0:
             return
@@ -226,23 +240,32 @@ class StatusReporter:
         )
 
         if ui_state == "RUNNING" and has_min and coins_eff is not None:
-            self._coin_rate_samples.append(
-                {
-                    "captured_at": datetime.fromtimestamp(now).astimezone().isoformat(
-                        timespec="seconds"
-                    ),
-                    "wave": wave,
-                    "coins_per_minute_decimal": str(coins_eff),
-                    "display": coins_str,
-                    "confidence": round(float(coins_conf), 1),
-                    "game_speed": game_speed,
-                    "game_speed_confidence": (
-                        round(float(game_speed_conf), 1)
-                        if game_speed is not None
-                        else None
-                    ),
-                }
+            captured_at = datetime.fromtimestamp(now).astimezone().isoformat(
+                timespec="seconds"
             )
+            sample = {
+                "captured_at": captured_at,
+                "wave": wave,
+                "coins_per_minute_decimal": str(coins_eff),
+                "display": coins_str,
+                "confidence": round(float(coins_conf), 1),
+                "game_speed": game_speed,
+                "game_speed_confidence": (
+                    round(float(game_speed_conf), 1)
+                    if game_speed is not None
+                    else None
+                ),
+            }
+            self._coin_rate_samples.append(sample)
+            identity = str(active_round_identity_fingerprint or "").strip()
+            source_observation_id = str(observation_id or "").strip()
+            if identity and source_observation_id:
+                self._latest_coin_rate_observation = {
+                    "active_round_identity_fingerprint": identity,
+                    "observation_id": source_observation_id,
+                    "observed_at": captured_at,
+                    "value": coins_str,
+                }
             # A missed terminal boundary must not grow process memory forever.
             del self._coin_rate_samples[:-4096]
 

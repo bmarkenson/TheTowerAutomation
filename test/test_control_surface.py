@@ -319,8 +319,12 @@ def _publish_runtime_acknowledgements(
     acknowledgements: dict[str, object],
     runtime_active: bool = True,
     strategy_scope: dict[str, object] | None = None,
+    active_battle_screen_metrics: dict[str, object] | None = None,
     active_run_metrics: dict[str, object] | None = None,
     observation_identity: str | None = None,
+    observation_primary_state: str = "RUNNING",
+    observation_game_state: str = "active_battle",
+    observation_wave: int | None = None,
     holds: tuple[AuthorityHoldState, ...] = (),
 ) -> None:
     authority = RuntimeActionAuthority()
@@ -329,7 +333,7 @@ def _publish_runtime_acknowledgements(
         active_battle=True,
         battle_scope="ack-scope",
         battle_identity=observation_identity,
-        primary_state="RUNNING",
+        primary_state=observation_primary_state,
         holds=holds,
     )
     publisher = RuntimeActionAuthorityPublisher(
@@ -343,9 +347,9 @@ def _publish_runtime_acknowledgements(
             "schema_version": 1,
             "observation_id": f"{owner['runtime_id']}:1",
             "observed_at": now.isoformat(timespec="seconds"),
-            "primary_state": "RUNNING",
+            "primary_state": observation_primary_state,
             "home_battle_control": "UNKNOWN",
-            "game_state": "active_battle",
+            "game_state": observation_game_state,
             "active_battle": True,
             "activity_scope_run_id": "ack-scope",
             "target_generation": owner.get("target_generation"),
@@ -359,12 +363,20 @@ def _publish_runtime_acknowledgements(
             "pending_active_battle": None,
         },
     }
+    if active_battle_screen_metrics is not None:
+        control_model["active_battle_screen_metrics"] = (
+            active_battle_screen_metrics
+        )
     if active_run_metrics is not None:
         control_model["active_run_metrics"] = active_run_metrics
     if observation_identity is not None:
         observation = control_model["observation"]
         assert isinstance(observation, dict)
         observation["active_round_identity_fingerprint"] = observation_identity
+    if observation_wave is not None:
+        observation = control_model["observation"]
+        assert isinstance(observation, dict)
+        observation["wave"] = observation_wave
     assert publisher.publish(
         authority.snapshot(now=now.timestamp()),
         runtime_active=runtime_active,
@@ -800,6 +812,21 @@ def test_status_exposes_only_fresh_exact_runtime_live_metrics(tmp_path):
         owner=owner,
         acknowledgements=acknowledgements,
         observation_identity=ACTIVE_BATTLE_IDENTITY,
+        observation_wave=4323,
+        active_battle_screen_metrics={
+            "schema_version": 1,
+            "active_round_identity_fingerprint": ACTIVE_BATTLE_IDENTITY,
+            "wave": {
+                "value": 4323,
+                "observation_id": "runtime-live-metrics:1",
+                "observed_at": now.isoformat(timespec="seconds"),
+            },
+            "coins_per_minute": {
+                "value": "1.23T",
+                "observation_id": "runtime-live-metrics:periodic-7",
+                "observed_at": captured_at,
+            },
+        },
         active_run_metrics={
             "schema_version": 1,
             "status": "partial",
@@ -848,7 +875,92 @@ def test_status_exposes_only_fresh_exact_runtime_live_metrics(tmp_path):
             "coins_per_hour": "1810000000000000000",
         },
     }
+    assert fresh["control_model"]["observation"]["wave"] == 4323
+    assert "wave" not in fresh["control_model"]["workflow_evidence"]
+    assert fresh["control_model"]["active_battle_screen_metrics"] == {
+        "schema_version": 1,
+        "active_round_identity_fingerprint": ACTIVE_BATTLE_IDENTITY,
+        "wave": {
+            "value": 4323,
+            "observation_id": "runtime-live-metrics:1",
+            "observed_at": now.isoformat(timespec="seconds"),
+            "age_seconds": 0,
+        },
+        "coins_per_minute": {
+            "value": "1.23T",
+            "observation_id": "runtime-live-metrics:periodic-7",
+            "observed_at": captured_at,
+            "age_seconds": 75,
+        },
+    }
+    assert stale["control_model"]["active_battle_screen_metrics"] is None
     assert stale["control_model"]["active_run_metrics"] is None
+
+
+def test_status_retains_same_battle_metrics_on_an_offscreen_frame(tmp_path):
+    now = datetime.now().astimezone().replace(microsecond=0)
+    observed_at = (now - timedelta(seconds=5)).isoformat(timespec="seconds")
+    control = _control_with_all_request_identities(tmp_path)
+    owner = {
+        "runtime_id": "runtime-offscreen-metrics",
+        "pid": os.getpid(),
+        "adb_target": "localhost:5555",
+        "target_generation": 16,
+    }
+    lock_handle = _fresh_exact_runtime_lock(
+        tmp_path,
+        runtime_id="runtime-offscreen-metrics",
+        target_generation=16,
+    )
+    _publish_runtime_acknowledgements(
+        tmp_path,
+        now=now,
+        owner=owner,
+        acknowledgements=_directive_acknowledgements(
+            control,
+            acknowledged_at=now.isoformat(timespec="seconds"),
+        ),
+        observation_identity=ACTIVE_BATTLE_IDENTITY,
+        observation_primary_state="UNKNOWN",
+        observation_game_state="unknown",
+        active_battle_screen_metrics={
+            "schema_version": 1,
+            "active_round_identity_fingerprint": ACTIVE_BATTLE_IDENTITY,
+            "wave": {
+                "value": 5000,
+                "observation_id": "runtime-offscreen-metrics:previous",
+                "observed_at": observed_at,
+            },
+            "coins_per_minute": {
+                "value": "2.5T",
+                "observation_id": "runtime-offscreen-metrics:periodic",
+                "observed_at": observed_at,
+            },
+        },
+        active_run_metrics={
+            "schema_version": 1,
+            "status": "observed",
+            "active_round_identity_fingerprint": ACTIVE_BATTLE_IDENTITY,
+            "captured_at": observed_at,
+            "save_revision": 400,
+            "checkpoint_wave": 4998,
+            "whole_run": {"coins_per_hour": "2500000000000"},
+        },
+    )
+    try:
+        model = _service(tmp_path).status(now=now.timestamp())["control_model"]
+    finally:
+        lock_handle.close()
+
+    assert model["observation"]["available"] is True
+    assert model["observation"]["active_battle"] is True
+    assert model["observation"]["game_state"] == "unknown"
+    assert model["active_battle_screen_metrics"]["wave"]["value"] == 5000
+    assert (
+        model["active_battle_screen_metrics"]["coins_per_minute"]["value"]
+        == "2.5T"
+    )
+    assert model["active_run_metrics"]["checkpoint_wave"] == 4998
 
 
 def test_status_clears_rates_from_a_conflicted_live_checkpoint(tmp_path):
@@ -929,6 +1041,18 @@ def test_status_hides_live_metrics_not_bound_to_observed_round(
     }
     if metric_identity is not None:
         active_run_metrics["active_round_identity_fingerprint"] = metric_identity
+    active_battle_screen_metrics = {
+        "schema_version": 1,
+        "wave": {
+            "value": 4321,
+            "observation_id": "runtime-mismatched-live-metrics:1",
+            "observed_at": now.isoformat(timespec="seconds"),
+        },
+    }
+    if metric_identity is not None:
+        active_battle_screen_metrics[
+            "active_round_identity_fingerprint"
+        ] = metric_identity
     _publish_runtime_acknowledgements(
         tmp_path,
         now=now,
@@ -938,16 +1062,16 @@ def test_status_hides_live_metrics_not_bound_to_observed_round(
             acknowledged_at=now.isoformat(timespec="seconds"),
         ),
         observation_identity=ACTIVE_BATTLE_IDENTITY,
+        active_battle_screen_metrics=active_battle_screen_metrics,
         active_run_metrics=active_run_metrics,
     )
     try:
-        metrics = _service(tmp_path).status(now=now.timestamp())[
-            "control_model"
-        ]["active_run_metrics"]
+        model = _service(tmp_path).status(now=now.timestamp())["control_model"]
     finally:
         lock_handle.close()
 
-    assert metrics is None
+    assert model["active_battle_screen_metrics"] is None
+    assert model["active_run_metrics"] is None
 
 
 def test_runtime_acknowledgements_survive_action_log_rotation(tmp_path):
@@ -4119,7 +4243,9 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert "When this battle ends" in html
     assert 'id="terminalPolicyStatus"' in html
     assert "RetryModeButton" not in native_xaml
-    assert "MinimumServerRevision = 47" in native_compatibility
+    assert "MinimumServerRevision = 48" in native_compatibility
+    assert '"active_battle_screen_metrics_v1"' in native_compatibility
+    assert "active_battle_screen_metrics_v1" in CONTROL_SURFACE_CAPABILITIES
     assert '"active_run_metrics_v1"' in native_compatibility
     assert "active_run_metrics_v1" in CONTROL_SURFACE_CAPABILITIES
     assert '"emulator_host_selection_v1"' in native_compatibility
@@ -4473,6 +4599,9 @@ def test_native_status_uses_only_published_dashboard_metrics():
     native_presenter = (native_root / "ActiveRunMetricPresenter.cs").read_text(
         encoding="utf-8"
     )
+    screen_presenter = (
+        native_root / "BattleScreenMetricPresenter.cs"
+    ).read_text(encoding="utf-8")
 
     assert 'JsonPropertyName("server_time")' in native_models
     assert 'JsonPropertyName("current_run")' in native_models
@@ -4487,7 +4616,18 @@ def test_native_status_uses_only_published_dashboard_metrics():
     assert "FormatRunElapsed(" in native_code
     assert "status.ServerTime" in native_code
     assert "RunElapsedMetricPanel.Visibility = processActive" in native_code
-    assert 'GameState: "active_battle"' in native_code
+    assert "ActiveBattle: true" in native_code
+    assert 'Text="SCREEN AGE"' in native_xaml
+    assert 'Text="HEARTBEAT"' not in native_xaml
+    assert 'JsonPropertyName("active_battle_screen_metrics")' in native_models
+    assert "BattleScreenMetricPresenter.Present(" in native_code
+    assert "RenderBattleScreenMetrics(" in native_code
+    assert "presentation.WaveRetained" in native_code
+    assert "presentation.CoinsPerMinuteRetained" in native_code
+    assert "waveRetained ? \"*\" : \"\"" in screen_presenter
+    assert "coinsRetained ? \"*\" : \"\"" in screen_presenter
+    assert "status.Observation?.Wave" not in native_code
+    assert "status.Observation?.CoinsPerMinute" not in native_code
     assert 'JsonPropertyName("active_run_metrics")' in native_models
     assert 'JsonPropertyName("whole_run")' in native_models
     assert 'JsonPropertyName("interval")' in native_models

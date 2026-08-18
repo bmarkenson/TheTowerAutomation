@@ -106,8 +106,9 @@ DEFAULT_STALE_AFTER_SECONDS = 180
 EMULATOR_DEGRADATION_CACHE_SECONDS = 60.0
 # Advance this when a newer Windows client must reload the resident service,
 # and advance that client's MinimumServerRevision in the same change.
-CONTROL_SURFACE_REVISION = 47
+CONTROL_SURFACE_REVISION = 48
 CONTROL_SURFACE_CAPABILITIES = (
+    "active_battle_screen_metrics_v1",
     "active_battle_strategy_adoption",
     "active_run_metrics_v1",
     "advisory_preflight_decisions",
@@ -5883,6 +5884,7 @@ class ControlSurfaceService:
         runtime_lifecycle: Mapping[str, Any] = {}
         runtime_strategy_scope: Mapping[str, Any] = {}
         runtime_catastrophic_pause_hold: Mapping[str, Any] = {}
+        active_battle_screen_metrics: Optional[dict[str, Any]] = None
         active_run_metrics: Optional[dict[str, Any]] = None
         runtime_startup_gate_policy: Optional[str] = None
         runtime_model = runtime_authority.get("control_model")
@@ -5906,6 +5908,12 @@ class ControlSurfaceService:
             )
             if isinstance(raw_catastrophic_hold, Mapping):
                 runtime_catastrophic_pause_hold = raw_catastrophic_hold
+            active_battle_screen_metrics = (
+                _normalize_active_battle_screen_metric_status(
+                    runtime_model.get("active_battle_screen_metrics"),
+                    now=now,
+                )
+            )
             active_run_metrics = _normalize_active_run_metric_status(
                 runtime_model.get("active_run_metrics"),
                 now=now,
@@ -5958,17 +5966,30 @@ class ControlSurfaceService:
                     )
                 ),
             }
-        if not (
+        active_battle_metrics_bound = bool(
             evidence is not None
             and runtime_authority.get("owner_matches_exact_runtime") is True
             and runtime_authority.get("active_battle") is True
-            and observation.get("game_state") == "active_battle"
+            and observation.get("active_battle") is True
+            and observation.get("active_round_identity_fingerprint")
+            == runtime_authority.get("runtime_battle_identity")
+        )
+        if not (
+            active_battle_metrics_bound
+            and active_battle_screen_metrics is not None
+            and active_battle_screen_metrics.get(
+                "active_round_identity_fingerprint"
+            )
+            == observation.get("active_round_identity_fingerprint")
+        ):
+            active_battle_screen_metrics = None
+        if not (
+            active_battle_metrics_bound
             and active_run_metrics is not None
             and active_run_metrics.get(
                 "active_round_identity_fingerprint"
             )
             == observation.get("active_round_identity_fingerprint")
-            == runtime_authority.get("runtime_battle_identity")
         ):
             active_run_metrics = None
 
@@ -6755,6 +6776,7 @@ class ControlSurfaceService:
                 ),
             },
             "observation": observation,
+            "active_battle_screen_metrics": active_battle_screen_metrics,
             "active_run_metrics": active_run_metrics,
             "strategy_scope": {
                 "startup_default": startup_strategy,
@@ -6919,6 +6941,88 @@ class ControlSurfaceService:
         except OSError as exc:
             return f"Control changed, but audit logging failed: {exc}"
         return None
+
+
+def _normalize_active_battle_screen_metric_status(
+    value: object,
+    *,
+    now: float,
+) -> Optional[dict[str, Any]]:
+    """Validate retained screen facts and add Linux-server-derived ages."""
+
+    if not isinstance(value, Mapping) or value.get("schema_version") != 1:
+        return None
+    active_round_identity = _valid_battle_identity_fingerprint(
+        value.get("active_round_identity_fingerprint")
+    )
+    if active_round_identity is None:
+        return None
+
+    def provenance(candidate: object) -> Optional[dict[str, Any]]:
+        if not isinstance(candidate, Mapping):
+            return None
+        observed_at = str(candidate.get("observed_at") or "").strip()
+        observed = _parse_timestamp(observed_at)
+        observation_id = " ".join(
+            str(candidate.get("observation_id") or "").split()
+        )
+        if (
+            observed is None
+            or not observation_id
+            or len(observation_id) > 128
+        ):
+            return None
+        return {
+            "observation_id": observation_id,
+            "observed_at": observed_at,
+            "age_seconds": min(
+                2_147_483_647,
+                max(0, int(float(now) - observed.timestamp())),
+            ),
+        }
+
+    raw_wave = value.get("wave")
+    wave_provenance = provenance(raw_wave)
+    wave_value = (
+        raw_wave.get("value")
+        if isinstance(raw_wave, Mapping)
+        else None
+    )
+    wave = (
+        {**wave_provenance, "value": wave_value}
+        if wave_provenance is not None
+        and type(wave_value) is int
+        and 0 <= wave_value <= 2_147_483_647
+        else None
+    )
+
+    raw_coins = value.get("coins_per_minute")
+    coin_provenance = provenance(raw_coins)
+    raw_coin_value = (
+        raw_coins.get("value")
+        if isinstance(raw_coins, Mapping)
+        else None
+    )
+    coin_value = (
+        " ".join(raw_coin_value.split())
+        if isinstance(raw_coin_value, str)
+        else ""
+    )
+    coins_per_minute = (
+        {**coin_provenance, "value": coin_value}
+        if coin_provenance is not None
+        and coin_value
+        and len(coin_value) <= 96
+        else None
+    )
+    if wave is None and coins_per_minute is None:
+        return None
+    return {
+        "schema_version": 1,
+        "active_round_identity_fingerprint": active_round_identity,
+        "wave": wave,
+        "coins_per_minute": coins_per_minute,
+    }
 
 
 _ACTIVE_RUN_WHOLE_RATE_FIELDS = (

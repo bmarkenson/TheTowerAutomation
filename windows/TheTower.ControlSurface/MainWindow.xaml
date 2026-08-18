@@ -269,9 +269,9 @@
             <TextBlock Text="OBSERVED SPEED" Foreground="{StaticResource MutedBrush}" FontSize="9" />
             <TextBlock x:Name="ObservedSpeedText" Text="-" FontSize="15" FontWeight="Bold" />
           </StackPanel>
-          <StackPanel Grid.Row="1" Grid.Column="5" Margin="2,0,0,0">
-            <TextBlock Text="HEARTBEAT" Foreground="{StaticResource MutedBrush}" FontSize="9" />
-            <TextBlock x:Name="HeartbeatText" Text="-" FontSize="15" FontWeight="Bold" TextWrapping="Wrap" />
+          <StackPanel Grid.Row="1" Grid.Column="5" x:Name="ScreenAgeMetricPanel" Margin="2,0,0,0">
+            <TextBlock Text="SCREEN AGE" Foreground="{StaticResource MutedBrush}" FontSize="9" />
+            <TextBlock x:Name="ScreenAgeText" Text="-" FontSize="15" FontWeight="Bold" TextWrapping="Wrap" />
           </StackPanel>
           <StackPanel Grid.Row="2" Grid.Column="0"
                       x:Name="WholeRunCphMetricPanel"
