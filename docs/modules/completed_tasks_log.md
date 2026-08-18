@@ -39,6 +39,20 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-18 Canonical Codex worktree creation
+
+- Exact implementation candidate `c1716fe` adds a trusted project rule for the
+  canonical `git worktree add -b` prefix and documents that exact startup form.
+  New feature and integration worktrees can therefore update shared Git
+  metadata on their first invocation without a sacrificial sandbox failure;
+  force-reset, detached, removal, and other Git operations remain outside the
+  allow rule.
+- `codex execpolicy check` accepted both canonical creation examples and left
+  the checked `-B` and removal variants unmatched. Documentation lifecycle
+  validation passed all 4 tests, and the exact candidate passed
+  `git diff --check` using development-environment fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+
 ### 2026-08-18 Save-backed Orb values with live Range confirmation
 
 - [`ISSUE-2026-055`](../issues/resolved-2026.md#home-orb-tuple-was-discarded-before-live-range-confirmation)
