@@ -30,6 +30,20 @@ least two substantial independent tasks can proceed in parallel, to at most
 three direct subagents; descendants need operator authorization. One writer
 owns a checkout, and parallel writers need separate feature worktrees.
 
+Create a worker checkout with this canonical argument order so the trusted
+project rule routes the Git-metadata mutation outside the sandbox before it
+runs:
+
+```bash
+git worktree add -b feature/<task> /home/brianm/dev/python/TheTower-worktrees/workers/<task> main
+```
+
+An integration coordinator uses the analogous `integration/<outcome>` branch
+and directory with the same `git worktree add -b` prefix. A Codex session that
+predates the rule must request escalation for its first invocation instead of
+probing inside the sandbox. A `.git/refs` creation failure is not evidence of a
+ref-layout collision until the refs and target path have been inspected.
+
 Repository artifacts—not chat—carry durable state. Checkpoint there before a
 handoff or coordinator replacement, and use a handoff only when another
 top-level chat continues the work. Read-only work ends with its evidence.
