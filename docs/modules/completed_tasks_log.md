@@ -39,6 +39,30 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-18 Per-frame Windows battle status
+
+- Exact implementation candidate `a0a8db1` publishes Wave from each accepted
+  canonical Running observation while retaining the last exact-round Wave and
+  periodic Coins/min sample across OCR misses and temporary off-battle screens.
+  Human-readable `STATUS` logging remains sparse, Wave is never extrapolated,
+  and display evidence remains excluded from workflow/input authority.
+- The native status band reuses its existing columns: **Heartbeat** becomes
+  compact **Screen Age**, retained Wave and Coins/min values receive a muted
+  `*` with source/age detail in their tooltips, and the save-checkpoint row
+  remains visible while fresh exact-owner evidence proves the same battle. No
+  next-screenshot countdown is synthesized for handler-specific recaptures.
+- The runtime-Python candidate-gate row required the complete checkpoint; it
+  passed compilation, state definitions, clickmap integrity with zero errors
+  and the established 44 orphan notices, and all 3,040 repository tests in
+  672.07 seconds. Affected checks also passed 527 Python/documentation tests,
+  the corrected Tournament call-contract test, 215 portable Control Surface
+  tests, 18 portable Tunnel Host tests, and the Release WindowsDesktop
+  cross-build with zero errors. The cross-build's only warnings were the
+  established read-only NuGet vulnerability-cache `NU1900`; it is not a
+  Windows WPF runtime validation. Validation used development-environment
+  fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+
 ### 2026-08-18 Save-backed Orb values with live Range confirmation
 
 - [`ISSUE-2026-055`](../issues/resolved-2026.md#home-orb-tuple-was-discarded-before-live-range-confirmation)
