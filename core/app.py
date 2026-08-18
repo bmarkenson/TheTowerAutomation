@@ -1583,6 +1583,40 @@ class App:
                 )
             except BattleIdentityStoreError:
                 self._retained_battle_identity_record = None
+            save_coordinator = getattr(
+                self,
+                "_player_save_preflight_coordinator",
+                None,
+            )
+            refresh_running_evidence = getattr(
+                save_coordinator,
+                "refresh_running_evidence",
+                None,
+            )
+            if callable(refresh_running_evidence):
+                try:
+                    refresh_running_evidence(
+                        result.acquisition,
+                        active_round_identity_fingerprint=(
+                            result.identity.fingerprint
+                        ),
+                    )
+                except Exception as exc:
+                    fallback_checks = getattr(
+                        save_coordinator,
+                        "fallback_checks",
+                        None,
+                    )
+                    if callable(fallback_checks):
+                        fallback_checks(
+                            "running_save_orb_refresh_failed",
+                            check_ids=("orb_distance",),
+                        )
+                    log(
+                        "[PLAYER_SAVE_PREFLIGHT] Forced running-save Orb "
+                        f"refresh failed safely: {exc}",
+                        "DEBUG",
+                    )
             self._publish_forced_battle_identity_bundle(
                 result.acquisition,
                 relation=result.relation,

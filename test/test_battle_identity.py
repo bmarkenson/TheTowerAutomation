@@ -1245,6 +1245,7 @@ def test_running_start_binds_forced_identity_before_completion(tmp_path):
     )
     app._battle_identity_coordinator = Mock()
     app._battle_identity_coordinator.bind.return_value = result
+    app._player_save_preflight_coordinator = Mock()
     app._battle_identity_store = BattleIdentityStore(
         tmp_path / "battle_identity.json"
     )
@@ -1277,6 +1278,13 @@ def test_running_start_binds_forced_identity_before_completion(tmp_path):
     app._mission_mgr.observe_active_round_identity.assert_called_once_with(
         identity.fingerprint,
         changed_from_retained=False,
+    )
+    refresh_running = (
+        app._player_save_preflight_coordinator.refresh_running_evidence
+    )
+    refresh_running.assert_called_once_with(
+        acquisition,
+        active_round_identity_fingerprint=identity.fingerprint,
     )
     app._publish_forced_battle_identity_bundle.assert_called_once_with(
         acquisition,

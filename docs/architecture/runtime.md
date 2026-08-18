@@ -101,16 +101,18 @@ Attack Range selects its matching Extra/Workshop pair. That observation may
 come from the guarded UI or from one exact-version save calculation using the
 active total Workshop level, selected/researched Range lab, live Range Card,
 Cannon Module bonuses, native binary32 compression, and display formatting.
-Only `current_active_round` scope with a maxed current Range level can replace
-the Range UI itself. A verified Home save with mutable or out-of-round Range
-may carry one exact configured Orb tuple as conditional evidence across the
-owned launch. The runtime still reads live Range; an equal Range uses that
-saved pair and omits Distance Adjuster, while a difference, invalid tuple,
-forced audit, or continuity failure restores the existing Orb UI route.
-Unreadable Range retains the existing degraded result. A readable Range
-outside that set is preserved as an operator experiment without opening
-Distance Adjuster. Unreadable Range evidence skips that adjustment and is
-retained as degraded validation evidence. Tier 18 Farm binds
+The already-required forced save that binds the active-round identity also
+resolves the launch-bound Orb refresh intent before initialization, replacing
+its Home-deferred tuple when one was available. A unique
+`current_active_round` calculation from that exact bundle supplies both live
+Range and Orb values for one point-in-time setup consumption, even when the
+current Range level is not maxed, so neither UI is opened. Nonmax Range remains
+ineligible as a round-invariant standalone fact. A difference, invalid tuple,
+forced audit, changed target/identity/requirement, or unavailable forced save
+discards the deferred value and restores the existing guarded UI route. A
+readable UI Range outside the configured set is still preserved as an operator
+experiment without opening Distance Adjuster, and unreadable fallback evidence
+remains degraded. Tier 18 Farm binds
 Range `30.00m` to Extra `30.00m` and Workshop `39.00m`; Tier 18 and Tier 19
 Farm both enforce the observed configured Range pair. If a
 freshly matched arrow is unavailable or one verified tap leaves its value
@@ -1176,10 +1178,11 @@ result, the explicitly
 `run_when_attached` battle-only rules observe Damage Slider and the configured
 Orb Distance pair for an authoritative configured Attack Range; they do not
 change either value. A bound save can skip the Range/Distance panels only when
-its independently calculated Attack Range is complete, max-stable, and bound
-to that active round, and its two Orb raw fields uniquely match the same
-Range-bound tuple. Preset labels and the selected lab level alone are never
-live Range evidence. A
+its independently calculated Attack Range is bound to that active round and
+its two Orb raw fields uniquely match the same Range-bound tuple. A nonmax
+Range is consumed only as point-in-time evidence from that exact forced
+attachment save, not retained as a round invariant. Preset labels and the
+selected lab level alone are never live Range evidence. A
 readable unconfigured Range is preserved without opening Distance Adjuster.
 The attachment path never selects a Home preset or equips a loadout. The
 separate guarded process-reload

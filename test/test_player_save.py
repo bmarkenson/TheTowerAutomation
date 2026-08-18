@@ -2361,7 +2361,7 @@ def test_orb_distance_preset_names_do_not_change_range_authority(monkeypatch):
     }
 
 
-def test_mutable_attack_range_defers_orb_authority_to_live_range(monkeypatch):
+def test_current_active_range_authorizes_orb_point_in_time(monkeypatch):
     decoded = _decoded_save_v1101()
     decoded.update(
         innerOrbDistance=3.0,
@@ -2382,12 +2382,9 @@ def test_mutable_attack_range_defers_orb_authority_to_live_range(monkeypatch):
         "extra": "30.00m",
         "workshop": "39.00m",
     }
-    assert evidence.complete is False
-    assert "requires stable effective Attack Range" in evidence.reason
-    assert evidence.authority["deferred_confirmation"] == {
-        "kind": "live_attack_range",
-        "range_basis": "30.00m",
-    }
+    assert evidence.complete is True
+    assert evidence.reason == ""
+    assert "deferred_confirmation" not in evidence.authority
 
     requirements = {
         "orb_distance": {
@@ -2400,12 +2397,9 @@ def test_mutable_attack_range_defers_orb_authority_to_live_range(monkeypatch):
         requirements,
         freshness_verified=True,
     )["checks"]["orb_distance"]
-    assert decision["disposition"] == "ui_required"
-    assert decision["ui_required"] is True
-    assert decision["deferred_confirmation"] == {
-        "kind": "live_attack_range",
-        "range_basis": "30.00m",
-    }
+    assert decision["disposition"] == "save_match"
+    assert decision["ui_required"] is False
+    assert decision["deferred_confirmation"] is None
 
     audit = reconcile_requirements(
         snapshot,
@@ -2416,7 +2410,7 @@ def test_mutable_attack_range_defers_orb_authority_to_live_range(monkeypatch):
     assert audit["deferred_confirmation"] is None
 
 
-def test_unproved_v1073_range_defers_orb_authority_to_live_range(monkeypatch):
+def test_mutable_v1073_active_range_resolves_current_orb(monkeypatch):
     decoded = _decoded_save()
     decoded.update(
         innerOrbDistance=3.0,
@@ -2428,13 +2422,13 @@ def test_unproved_v1073_range_defers_orb_authority_to_live_range(monkeypatch):
     assert snapshot.checks["attack_range"].status == "observed"
     assert snapshot.checks["attack_range"].complete is False
     assert snapshot.checks["orb_distance"].status == "observed"
-    assert snapshot.checks["orb_distance"].complete is False
+    assert snapshot.checks["orb_distance"].complete is True
     assert snapshot.checks["orb_distance"].value == {
         "range_basis": "30.00m",
         "extra": "30.00m",
         "workshop": "39.00m",
     }
-    assert "can_still_upgrade" in snapshot.checks["orb_distance"].reason
+    assert snapshot.checks["orb_distance"].reason == ""
 
 
 def test_out_of_round_attack_range_never_suppresses_live_orb_ui(monkeypatch):
@@ -2468,7 +2462,7 @@ def test_out_of_round_attack_range_never_suppresses_live_orb_ui(monkeypatch):
 
 
 @pytest.mark.parametrize("stable", (False, True))
-def test_attachment_projects_orb_only_with_stable_live_attack_range(
+def test_attachment_projects_orb_from_current_live_attack_range(
     monkeypatch,
     stable,
 ):
@@ -2512,13 +2506,17 @@ def test_attachment_projects_orb_only_with_stable_live_attack_range(
 
     assert observations is not None
     projected = {fact.check_id for fact in observations.facts}
+    assert "orb_distance" in projected
     if stable:
         assert {"attack_range", "orb_distance"} <= projected
         facts = {fact.check_id: fact for fact in observations.facts}
         assert facts["attack_range"].temporal_class.value == "round_invariant"
     else:
         assert "attack_range" not in projected
-        assert "orb_distance" not in projected
+        facts = {fact.check_id: fact for fact in observations.facts}
+        assert facts["orb_distance"].temporal_class.value == (
+            "current_configuration"
+        )
 
 
 def test_malformed_range_dependency_does_not_invalidate_unrelated_checks(

@@ -63,6 +63,33 @@ resolved dossier instead of copying its detail.
   fingerprint
   `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
 
+### 2026-08-18 Save-only live Range and Orb setup
+
+- [`ISSUE-2026-056`](../issues/resolved-2026.md#forced-running-save-was-not-reused-for-live-orb-range)
+  reuses the exact forced active-round identity save to calculate live Attack
+  Range and resolve the mapped Orb tuple before initialization. A matching
+  bundle now omits both Attack Range and Distance Adjuster UI; guarded fallback
+  remains for every binding, identity, mapping, requirement, or value failure.
+- The affected 799-test gate passed. Exact implementation candidate `7ec154a`
+  passed compilation, state definitions, clickmap integrity with zero errors
+  and the established 44 orphan notices, and all 3,039 repository tests in
+  481.04 seconds using development-environment fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+
+### 2026-08-18 Canonical Codex worktree creation
+
+- Exact implementation candidate `c1716fe` adds a trusted project rule for the
+  canonical `git worktree add -b` prefix and documents that exact startup form.
+  New feature and integration worktrees can therefore update shared Git
+  metadata on their first invocation without a sacrificial sandbox failure;
+  force-reset, detached, removal, and other Git operations remain outside the
+  allow rule.
+- `codex execpolicy check` accepted both canonical creation examples and left
+  the checked `-B` and removal variants unmatched. Documentation lifecycle
+  validation passed all 4 tests, and the exact candidate passed
+  `git diff --check` using development-environment fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+
 ### 2026-08-18 Save-backed Orb values with live Range confirmation
 
 - [`ISSUE-2026-055`](../issues/resolved-2026.md#home-orb-tuple-was-discarded-before-live-range-confirmation)
