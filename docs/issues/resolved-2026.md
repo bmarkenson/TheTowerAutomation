@@ -8,6 +8,51 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Home Orb tuple was discarded before live Range confirmation
+
+**Stable ID:** `ISSUE-2026-055` · **Lifecycle:** `resolved`
+
+- **Observed:** On 2026-08-18 an ordinary Farm new-run preflight decoded the
+  exact configured `30.00m / 30.00m / 39.00m` Range/Extra/Workshop tuple from
+  the stable Home save, but classified Orb Distance as UI-required because
+  Attack Range had `configured_out_of_round` scope. The successor then read
+  live Range `30.00m`, opened Distance Adjuster, observed the same saved
+  `30.00m / 39.00m` pair, changed nothing, and closed it.
+- **Symptom:** Automation correctly refused to treat Home Attack Range as live,
+  but unnecessarily discarded the independently exact Orb fields with it. It
+  therefore OCRed both Orb values through Distance Adjuster on normal Farm
+  launches even when the save already held the configured pair.
+- **Safety response:** Diagnosis used fresh read-only runtime, control, log,
+  and save-preflight evidence. It sent no device input. Mutable or out-of-round
+  Range remained unable to suppress the live Range read, and a saved tuple
+  could not authorize Orb adjustment.
+- **Cause:** `_orb_distance_evidence()` returned `unmapped` before comparing
+  the two raw Orb fields whenever effective Range was not complete,
+  max-stable, and `current_active_round`. The exact-next-battle carrier had no
+  representation for evidence that was exact but still conditional on one
+  live dependency.
+- **Resolution:** A unique mapped Orb tuple may now remain incomplete
+  `observed` evidence with an explicit `live_attack_range` confirmation. Only
+  trusted, validated, requirement-matching `save_first` decisions carry that
+  tuple across the exact owned launch. The running workflow still reads Attack
+  Range from the guarded UI. When the live Range selects the identical saved
+  tuple, it completes without opening Distance Adjuster; any changed Range,
+  invalid tuple/action, forced audit, ownership failure, or continuity failure
+  retains the existing UI fallback. Complete max-stable active saves continue
+  to use the original full shortcut. Deferred facts share the carrier's
+  context, launch, binding, invalidation, fallback, and single-use guards.
+- **Regression and validation:** Decoder tests cover mutable and out-of-round
+  Range, exact deferred authority, and audit rejection. Carrier tests cover
+  exact launch binding, single consumption, and fallback. Executor/controller
+  tests prove a matching live Range omits Distance Adjuster and a different
+  Range opens the complete existing path. The four affected suites passed 326
+  tests, documentation lifecycle checks passed, and exact candidate `79e2ba2`
+  passed compilation, state definitions, clickmap integrity with zero errors
+  and the established 44 orphan notices, and all 3,036 repository tests in
+  439.00 seconds using development-environment fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+- **Fixed by:** `79e2ba2`.
+
 ### Enabled automation could not recover an unowned Welcome Back battle
 
 **Stable ID:** `ISSUE-2026-054` · **Lifecycle:** `resolved`

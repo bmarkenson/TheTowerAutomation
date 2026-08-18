@@ -39,6 +39,20 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-18 Save-backed Orb values with live Range confirmation
+
+- [`ISSUE-2026-055`](../issues/resolved-2026.md#home-orb-tuple-was-discarded-before-live-range-confirmation)
+  retains an exact mapped Home-save Orb tuple across the owned launch while
+  keeping Attack Range on its guarded live read. An equal live Range now omits
+  Distance Adjuster; any difference or uncertainty keeps the full existing UI
+  fallback.
+- Exact implementation candidate `79e2ba2` passed the four affected suites
+  (326 tests), documentation lifecycle checks, compilation, state definitions,
+  clickmap integrity with zero errors and the established 44 orphan notices,
+  and all 3,036 repository tests in 439.00 seconds using development-
+  environment fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+
 ### 2026-08-17 Telemetry rejection presentation
 
 - Exact implementation candidate `9f594d1` keeps the compact Host Health queue
