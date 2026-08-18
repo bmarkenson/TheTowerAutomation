@@ -8,6 +8,7 @@ record is deliberately free of raw save data and private target identifiers.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 from enum import Enum
 import hashlib
@@ -26,6 +27,7 @@ from core.player_save import (
 )
 from core.player_save_acquisition import (
     PlayerSaveAcquisitionBundle,
+    PlayerSaveAcquisitionType,
     PlayerSaveTargetBinding,
     StablePlayerSaveAcquirer,
 )
@@ -152,6 +154,7 @@ class CarriedPlayerSaveEvidence:
     effective_mapping_fingerprint: str
     values: dict[str, Any]
     deferred_values: dict[str, Any] = field(default_factory=dict)
+    running_refresh_checks: set[str] = field(default_factory=set)
     state: CarriedEvidenceState = CarriedEvidenceState.PENDING_LAUNCH
     launch_kind: str = "home_new_battle"
     source_activity_scope_id: str = field(default="", repr=False)
@@ -238,6 +241,7 @@ class CarriedPlayerSaveEvidence:
         ):
             return None
         self.consumed.add(normalized)
+        self.running_refresh_checks.discard(normalized)
         value = self.values[normalized]
         self._finish_if_consumed()
         return value
@@ -263,6 +267,7 @@ class CarriedPlayerSaveEvidence:
         ):
             return None
         self.deferred_consumed.add(normalized)
+        self.running_refresh_checks.discard(normalized)
         value = self.deferred_values[normalized]
         self._finish_if_consumed()
         return value
@@ -270,7 +275,7 @@ class CarriedPlayerSaveEvidence:
     def _finish_if_consumed(self) -> None:
         if not (set(self.values) - self.consumed) and not (
             set(self.deferred_values) - self.deferred_consumed
-        ):
+        ) and not self.running_refresh_checks:
             self.state = CarriedEvidenceState.CONSUMED
 
     def reject_checks(self, check_ids: tuple[str, ...], reason: str) -> None:
@@ -285,6 +290,9 @@ class CarriedPlayerSaveEvidence:
             if check_id in self.deferred_values:
                 self.deferred_values.pop(check_id, None)
                 rejected = True
+            if check_id in self.running_refresh_checks:
+                self.running_refresh_checks.discard(check_id)
+                rejected = True
             if rejected:
                 self.fallback_reasons[check_id] = normalized_reason
         if (
@@ -294,6 +302,7 @@ class CarriedPlayerSaveEvidence:
             }
             and not (set(self.values) - self.consumed)
             and not (set(self.deferred_values) - self.deferred_consumed)
+            and not self.running_refresh_checks
         ):
             self.state = CarriedEvidenceState.CONSUMED
 
@@ -305,6 +314,7 @@ class CarriedPlayerSaveEvidence:
             return
         self.values.clear()
         self.deferred_values.clear()
+        self.running_refresh_checks.clear()
         self.state = CarriedEvidenceState.INVALIDATED
         self.invalidation_reason = str(reason or "continuity_invalidated")
 
@@ -321,7 +331,7 @@ class CarriedPlayerSaveEvidence:
 
     def as_dict(self) -> dict[str, Any]:
         return {
-            "schema_version": 2,
+            "schema_version": 3,
             "state": self.state.value,
             "provenance": self.context.redacted(),
             "snapshot_fingerprint": self.snapshot_fingerprint,
@@ -342,6 +352,7 @@ class CarriedPlayerSaveEvidence:
                 set(self.deferred_values) - self.deferred_consumed
             ),
             "deferred_consumed_checks": sorted(self.deferred_consumed),
+            "running_refresh_checks": sorted(self.running_refresh_checks),
             "fallback_checks": dict(sorted(self.fallback_reasons.items())),
             "invalidation_reason": self.invalidation_reason,
         }
@@ -463,6 +474,27 @@ def _deferred_carry_values(
             continue
         values[str(check_id)] = observed
     return values
+
+
+def _running_refresh_checks(
+    decisions: Mapping[str, Mapping[str, Any]],
+) -> set[str]:
+    """Return checks eligible for the exact successor's forced save."""
+
+    decision = decisions.get("orb_distance")
+    if not isinstance(decision, Mapping):
+        return set()
+    if (
+        decision.get("disposition") != "ui_required"
+        or decision.get("ui_required") is not True
+        or decision.get("snapshot_trusted") is not True
+        or decision.get("save_check_validated") is not True
+        or decision.get("save_requirement_supported") is not True
+        or decision.get("policy") == "preserve"
+        or decision.get("reason") == "scheduled_ui_audit"
+    ):
+        return set()
+    return {"orb_distance"}
 
 
 class PlayerSavePreflightCoordinator:
@@ -770,7 +802,8 @@ class PlayerSavePreflightCoordinator:
                 and decision.get("disposition") in SAVE_ACCEPTED_DISPOSITIONS
             }
             deferred_values = _deferred_carry_values(decisions)
-            if values or deferred_values:
+            running_refresh_checks = _running_refresh_checks(decisions)
+            if values or deferred_values or running_refresh_checks:
                 carry = CarriedPlayerSaveEvidence(
                     context=context,
                     snapshot_fingerprint=str(
@@ -781,6 +814,7 @@ class PlayerSavePreflightCoordinator:
                     ),
                     values=values,
                     deferred_values=deferred_values,
+                    running_refresh_checks=running_refresh_checks,
                 )
                 self._carry = carry
         return self._ready_result(
@@ -898,7 +932,8 @@ class PlayerSavePreflightCoordinator:
                 and decision.get("disposition") in SAVE_ACCEPTED_DISPOSITIONS
             }
             deferred_values = _deferred_carry_values(decisions)
-            if values or deferred_values:
+            running_refresh_checks = _running_refresh_checks(decisions)
+            if values or deferred_values or running_refresh_checks:
                 carry = CarriedPlayerSaveEvidence(
                     context=context,
                     snapshot_fingerprint=str(provenance["source_fingerprint"]),
@@ -908,6 +943,7 @@ class PlayerSavePreflightCoordinator:
                     ),
                     values=values,
                     deferred_values=deferred_values,
+                    running_refresh_checks=running_refresh_checks,
                     state=CarriedEvidenceState.LAUNCH_DISPATCHED,
                     launch_kind="game_over_direct_retry",
                     source_activity_scope_id=str(source_activity_scope_id),
@@ -997,6 +1033,7 @@ class PlayerSavePreflightCoordinator:
         return sorted(
             (set(carry.values) - carry.consumed)
             | (set(carry.deferred_values) - carry.deferred_consumed)
+            | set(carry.running_refresh_checks)
         )
 
     def invalidate(
@@ -1358,6 +1395,153 @@ class PlayerSavePreflightCoordinator:
                 "INFO",
             )
         return value
+
+    def refresh_running_evidence(
+        self,
+        acquisition: PlayerSaveAcquisitionBundle,
+        *,
+        active_round_identity_fingerprint: str,
+    ) -> bool:
+        """Resolve deferred Orb evidence from the forced running save.
+
+        Battle identity already owns this acquisition and its Android-Home
+        serialization transaction.  This method sends no input and performs
+        no second read; it resolves the pending Orb check, replacing any
+        Home-scoped conditional tuple, only when that exact bundle supplies a
+        current-active-round save match.
+        """
+
+        check_id = "orb_distance"
+        carry = self._carry
+        if (
+            carry is None
+            or carry.state is not CarriedEvidenceState.LAUNCH_DISPATCHED
+            or check_id not in carry.running_refresh_checks
+        ):
+            return False
+
+        def reject(reason: str, decision: Any = None) -> bool:
+            normalized_reason = str(
+                reason or "running_save_orb_evidence_unavailable"
+            )
+            carry.reject_checks((check_id,), normalized_reason)
+            if isinstance(decision, Mapping):
+                self._decisions[check_id] = dict(decision)
+            else:
+                existing = self._decisions.get(check_id)
+                if existing is not None:
+                    existing.update(
+                        disposition="ui_required",
+                        reason=normalized_reason,
+                        save_evidence_authoritative=False,
+                        ui_required=True,
+                        ui_requirement_kind="fallback",
+                        repair_queued=False,
+                    )
+            log(
+                "[PLAYER_SAVE_PREFLIGHT] Forced running save retained Orb "
+                f"UI fallback: reason={normalized_reason}",
+                "INFO",
+            )
+            return False
+
+        try:
+            context = self._context_fn()
+        except Exception:
+            self.invalidate("running_save_context_unavailable")
+            return False
+        if not carry.context.matches(context):
+            self.invalidate("running_save_context_changed")
+            return False
+
+        expected_identity = str(
+            active_round_identity_fingerprint or ""
+        ).strip()
+        if (
+            not isinstance(acquisition, PlayerSaveAcquisitionBundle)
+            or not acquisition.complete
+            or acquisition.snapshot is None
+            or acquisition.acquisition_type
+            is not PlayerSaveAcquisitionType.FORCED_SERIALIZATION
+            or not acquisition.matches_binding(
+                PlayerSaveTargetBinding(
+                    context.target,
+                    context.target_generation,
+                )
+            )
+        ):
+            return reject("running_save_binding_unverified")
+
+        snapshot = acquisition.snapshot
+        if str(snapshot.effective_mapping_fingerprint or "") != str(
+            carry.effective_mapping_fingerprint or ""
+        ):
+            return reject("running_save_mapping_changed")
+        runtime_save = snapshot.runtime_save
+        active_identity = getattr(
+            runtime_save,
+            "active_round_identity",
+            None,
+        )
+        if (
+            not expected_identity
+            or getattr(runtime_save, "round_active", None) is not True
+            or str(getattr(active_identity, "fingerprint", "") or "")
+            != expected_identity
+        ):
+            return reject("running_save_active_round_identity_changed")
+
+        prior_decision = self._decisions.get(check_id)
+        expected = (
+            deepcopy(prior_decision.get("expected"))
+            if isinstance(prior_decision, Mapping)
+            else None
+        )
+        policy = (
+            str(prior_decision.get("policy") or "enforce")
+            if isinstance(prior_decision, Mapping)
+            else "enforce"
+        )
+        requirement: dict[str, Any] = {"mode": policy}
+        if isinstance(expected, Mapping):
+            requirement["resolved"] = expected
+        elif isinstance(expected, (list, tuple)):
+            requirement["range_presets"] = expected
+        else:
+            return reject("running_save_orb_requirement_unavailable")
+
+        try:
+            plan = reconcile_acquired_requirements(
+                acquisition,
+                {check_id: requirement},
+            )
+            decision = (plan.get("checks") or {}).get(check_id)
+        except (TypeError, ValueError):
+            decision = None
+        if not isinstance(decision, Mapping):
+            return reject("running_save_orb_reconciliation_unavailable")
+
+        observed = decision.get("observed")
+        if (
+            decision.get("disposition") not in SAVE_ACCEPTED_DISPOSITIONS
+            or decision.get("ui_required") is not False
+            or not isinstance(observed, Mapping)
+        ):
+            return reject(
+                str(decision.get("reason") or "running_save_orb_requires_ui"),
+                decision,
+            )
+
+        carry.deferred_values.pop(check_id, None)
+        carry.running_refresh_checks.discard(check_id)
+        carry.values[check_id] = deepcopy(observed)
+        self._decisions[check_id] = dict(decision)
+        log(
+            "[PLAYER_SAVE_PREFLIGHT] Forced running save resolved Attack "
+            "Range and Orb Distance without UI",
+            "INFO",
+        )
+        return True
 
     def _same_context(self, expected: PlayerSavePreflightContext) -> bool:
         try:

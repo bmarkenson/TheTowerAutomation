@@ -135,11 +135,13 @@ as checked checkpoint narrative here.
       variance after exact equality with the reusable calculated Attack Range;
       preset names and `rangeLevelSelected` are not displayed-Range authority.
       Candidate receipts bind the calculated Range and its semantic-contract
-      fingerprint. Ambiguous overlap, incomplete/mutable active Range,
-      out-of-round scope, incompatible versions/shapes, and
-      unknown/unsupported values retain the complete UI route. The Attack Range
-      formula is versioned and proven separately; raw Orb tolerance still must
-      not infer a new semantic tuple or an Orb-distance conversion formula.
+      fingerprint. A nonmax active Range may supply only the one point-in-time
+      Orb setup when it comes from the exact forced active-round bundle;
+      ambiguous overlap, out-of-round or unbound/stale active evidence,
+      incompatible versions/shapes, and unknown/unsupported values retain the
+      complete UI route. The Attack Range formula is versioned and proven
+      separately; raw Orb tolerance still must not infer a new semantic tuple
+      or an Orb-distance conversion formula.
     - [ ] Before supporting mixed Ultimate Weapon primaries, validate one
       weapon index's off/on polarity at a time with normalized
       before/change/restore evidence. Validate Spotlight Missiles off through

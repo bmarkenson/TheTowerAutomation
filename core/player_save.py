@@ -3484,14 +3484,12 @@ def _orb_distance_evidence(
     range_observed = bool(
         attack_range.status == "observed" and attack_range.value
     )
-    range_complete = bool(
+    range_current = bool(
         range_observed
-        and attack_range.complete
-        and attack_range.stable
         and attack_range.scope == "current_active_round"
     )
     range_reason = (
-        "Orb Distance requires stable effective Attack Range: "
+        "Orb Distance requires current effective Attack Range: "
         + (
             attack_range.reason
             or (
@@ -3552,7 +3550,7 @@ def _orb_distance_evidence(
         "raw_float_tolerance": raw_float_tolerance,
         "attack_range": dict(attack_range.authority),
     }
-    if observed is not None and not range_complete:
+    if observed is not None and not range_current:
         authority["deferred_confirmation"] = {
             "kind": "live_attack_range",
             "range_basis": observed["range_basis"],

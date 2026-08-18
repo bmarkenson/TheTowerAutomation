@@ -178,7 +178,7 @@ def _snapshot_with_deferred_orb() -> PlayerSaveSnapshot:
                 orb,
                 ("innerOrbDistance", "workshopOrbDistance"),
                 complete=False,
-                reason="Orb Distance requires stable effective Attack Range",
+                reason="Orb Distance requires current effective Attack Range",
                 authority={
                     "kind": "exact_values",
                     "values": [orb],
@@ -187,6 +187,31 @@ def _snapshot_with_deferred_orb() -> PlayerSaveSnapshot:
                         "range_basis": "30.00m",
                     },
                 },
+            ),
+        },
+    )
+
+
+def _snapshot_with_running_refresh_only_orb() -> PlayerSaveSnapshot:
+    snapshot = _snapshot()
+    orb = {
+        "range_basis": "30.00m",
+        "extra": "30.00m",
+        "workshop": "39.00m",
+    }
+    return replace(
+        snapshot,
+        validated_checks=(*snapshot.validated_checks, "orb_distance"),
+        checks={
+            **snapshot.checks,
+            "orb_distance": SaveCheckEvidence(
+                "orb_distance",
+                "unmapped",
+                None,
+                ("innerOrbDistance", "workshopOrbDistance"),
+                complete=False,
+                reason="configured Range is unavailable outside the round",
+                authority={"kind": "exact_values", "values": [orb]},
             ),
         },
     )
@@ -233,6 +258,35 @@ def _terminal_acquisition(
                 active_round_identity_fingerprint
             ),
         ),
+    )
+
+
+def _forced_running_acquisition(
+    *,
+    identity_fingerprint: str = "b" * 64,
+    target: str = "private-device-target",
+    generation: int = 1,
+) -> PlayerSaveAcquisitionBundle:
+    captured = datetime.fromisoformat(CAPTURED_AT)
+    snapshot = replace(
+        _snapshot_with_battle_controls(),
+        runtime_save=SimpleNamespace(
+            round_active=True,
+            active_round_identity=SimpleNamespace(
+                fingerprint=identity_fingerprint,
+            ),
+        ),
+    )
+    return PlayerSaveAcquisitionBundle(
+        acquisition_type=PlayerSaveAcquisitionType.FORCED_SERIALIZATION,
+        status=PlayerSaveAcquisitionStatus.COMPLETE,
+        reason="captured",
+        binding=PlayerSaveTargetBinding(target, generation),
+        acquisition_started_at=captured - timedelta(milliseconds=1),
+        captured_at=captured,
+        acquisition_completed_at=captured + timedelta(milliseconds=1),
+        transport_stable=True,
+        snapshot=snapshot,
     )
 
 
@@ -686,6 +740,7 @@ def test_home_orb_tuple_is_carried_only_for_live_range_confirmation(
     assert result.carry is not None
     assert result.carry.values == {}
     assert result.carry.deferred_values == {"orb_distance": expected}
+    assert result.carry.running_refresh_checks == {"orb_distance"}
     assert result.carry.as_dict()["deferred_available_checks"] == [
         "orb_distance"
     ]
@@ -703,6 +758,138 @@ def test_home_orb_tuple_is_carried_only_for_live_range_confirmation(
     assert coordinator.consume_deferred("orb_distance") == expected
     assert coordinator.consume_deferred("orb_distance") is None
     assert result.carry.state is CarriedEvidenceState.CONSUMED
+
+
+def test_forced_running_save_resolves_orb_without_a_home_tuple(monkeypatch):
+    coordinator = _coordinator(
+        monkeypatch,
+        decode_fn=lambda _payload, **_kwargs: (
+            _snapshot_with_running_refresh_only_orb()
+        ),
+    )
+    expected = {
+        "range_basis": "30.00m",
+        "extra": "30.00m",
+        "workshop": "39.00m",
+    }
+    result = coordinator.acquire(
+        {
+            "orb_distance": {
+                "mode": "enforce",
+                "resolved": expected,
+            }
+        },
+        initial_frame=object(),
+    )
+
+    assert result.carry is not None
+    assert result.carry.values == {}
+    assert result.carry.deferred_values == {}
+    assert result.carry.running_refresh_checks == {"orb_distance"}
+    assert coordinator.mark_runtime_launch(
+        control=HomeBattleControl.NEW_BATTLE,
+        action_authorized=True,
+        dispatched=True,
+    )
+    assert coordinator.refresh_running_evidence(
+        _forced_running_acquisition(),
+        active_round_identity_fingerprint="b" * 64,
+    )
+    assert result.carry.running_refresh_checks == set()
+    assert result.carry.values["orb_distance"] == expected
+    assert coordinator.bind_running(
+        battle_started=True,
+        stable_running=True,
+        continuity_verified=True,
+    )
+    assert coordinator.consume("orb_distance") == expected
+
+
+def test_forced_running_save_replaces_deferred_orb_before_bind(monkeypatch):
+    coordinator = _coordinator(
+        monkeypatch,
+        decode_fn=lambda _payload, **_kwargs: _snapshot_with_deferred_orb(),
+    )
+    expected = {
+        "range_basis": "30.00m",
+        "extra": "30.00m",
+        "workshop": "39.00m",
+    }
+    alternate = {
+        "range_basis": "98.38m",
+        "extra": "87.16m",
+        "workshop": "80.37m",
+    }
+    result = coordinator.acquire(
+        {
+            "orb_distance": {
+                "mode": "enforce",
+                "range_presets": [expected, alternate],
+            }
+        },
+        initial_frame=object(),
+    )
+    assert result.carry is not None
+    assert coordinator.mark_runtime_launch(
+        control=HomeBattleControl.NEW_BATTLE,
+        action_authorized=True,
+        dispatched=True,
+    )
+
+    assert coordinator.refresh_running_evidence(
+        _forced_running_acquisition(),
+        active_round_identity_fingerprint="b" * 64,
+    )
+    assert result.carry.deferred_values == {}
+    assert result.carry.values["orb_distance"] == expected
+    assert coordinator.decision("orb_distance")["disposition"] == (
+        "save_match"
+    )
+    assert coordinator.bind_running(
+        battle_started=True,
+        stable_running=True,
+        continuity_verified=True,
+    )
+    assert coordinator.consume("orb_distance") == expected
+    assert coordinator.consume_deferred("orb_distance") is None
+
+
+def test_forced_running_save_identity_change_discards_deferred_orb(monkeypatch):
+    coordinator = _coordinator(
+        monkeypatch,
+        decode_fn=lambda _payload, **_kwargs: _snapshot_with_deferred_orb(),
+    )
+    result = coordinator.acquire(
+        {
+            "orb_distance": {
+                "mode": "enforce",
+                "resolved": {
+                    "range_basis": "30.00m",
+                    "extra": "30.00m",
+                    "workshop": "39.00m",
+                },
+            }
+        },
+        initial_frame=object(),
+    )
+    assert result.carry is not None
+    assert coordinator.mark_runtime_launch(
+        control=HomeBattleControl.NEW_BATTLE,
+        action_authorized=True,
+        dispatched=True,
+    )
+
+    assert not coordinator.refresh_running_evidence(
+        _forced_running_acquisition(identity_fingerprint="c" * 64),
+        active_round_identity_fingerprint="b" * 64,
+    )
+    assert result.carry.deferred_values == {}
+    assert result.carry.values == {}
+    assert result.carry.fallback_reasons == {
+        "orb_distance": "running_save_active_round_identity_changed"
+    }
+    assert coordinator.consume("orb_distance") is None
+    assert coordinator.consume_deferred("orb_distance") is None
 
 
 def test_deferred_orb_carry_preserves_full_ui_fallback(monkeypatch):
@@ -731,6 +918,7 @@ def test_deferred_orb_carry_preserves_full_ui_fallback(monkeypatch):
     )
 
     assert result.carry.deferred_values == {}
+    assert result.carry.running_refresh_checks == set()
     assert result.carry.fallback_reasons == {
         "orb_distance": "orb_distance_requirement_changed"
     }
