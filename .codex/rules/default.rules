@@ -1,3 +1,19 @@
+# Create required isolated worktrees without a sacrificial sandboxed attempt.
+prefix_rule(
+    pattern = ["git", "worktree", "add", "-b"],
+    decision = "allow",
+    justification = "Create TheTower's required isolated temporary worktree",
+    match = [
+        "git worktree add -b feature/example /home/brianm/dev/python/TheTower-worktrees/workers/example main",
+        "git worktree add -b integration/example /home/brianm/dev/python/TheTower-worktrees/integration/example main",
+    ],
+    not_match = [
+        "git worktree add -B feature/example /home/brianm/dev/python/TheTower-worktrees/workers/example main",
+        "git worktree add --detach /home/brianm/dev/python/TheTower-worktrees/workers/example main",
+        "git worktree remove /home/brianm/dev/python/TheTower-worktrees/workers/example",
+    ],
+)
+
 # Allow the production procedure's one explicit, non-force main publication.
 prefix_rule(
     pattern = [
