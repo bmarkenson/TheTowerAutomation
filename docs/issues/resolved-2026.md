@@ -8,9 +8,57 @@ and actionable work lives in
 
 ## Resolved issues
 
+### Forced running save was not reused for live Orb Range
+
+**Stable ID:** `ISSUE-2026-056` · **Lifecycle:** `resolved`
+
+- **Observed:** After [`ISSUE-2026-055`](#home-orb-tuple-was-discarded-before-live-range-confirmation),
+  an ordinary new-run setup retained the saved Orb pair but still opened the
+  Attack panel and OCRed Range. The runtime had already forced and decoded a
+  second save to bind that successor's exact active-round identity; that same
+  bundle contained `upgradeLevel[4]` plus every validated lab, Card, and Cannon
+  Module input needed by the effective Range calculator.
+- **Symptom:** Distance Adjuster was omitted for a matching Home tuple, but
+  Attack Range remained unnecessarily UI-backed even though a fresher,
+  exact-active-round save was already available before battle initialization.
+- **Cause:** The Orb decoder required calculated active Range to be max-stable
+  before accepting it, conflating round-invariant Range authority with one
+  point-in-time Orb setup dependency. The Home carrier also represented only a
+  saved tuple awaiting UI confirmation; it did not stage a refresh intent that
+  the forced battle-identity bundle could resolve.
+- **Resolution:** A unique mapped Orb tuple now accepts calculated
+  `current_active_round` Range as a one-use point-in-time dependency even when
+  the current level is nonmax. The standalone Range claim remains incomplete
+  and is not projected as a round invariant. `save_first` stages an eligible
+  Orb refresh across the exact owned launch, with or without a Home tuple, and
+  the already-required forced identity acquisition reconciles it before the
+  first running setup. Exact context, target generation, mapping fingerprint,
+  active-round identity, action requirement, Range, and Orb values must all
+  agree. A match enters ordinary single-use carried evidence and skips both UI
+  readers; any disagreement or unavailable evidence discards only this
+  shortcut and retains the complete existing UI fallback. Attachments consume
+  the same current-configuration Orb fact directly. No extra save acquisition
+  or device input was added.
+- **Regression and validation:** Tests cover nonmax active Range decoding,
+  attachment projection, refresh with and without a Home tuple, multi-Range
+  requirements, identity rejection, fallback cleanup, forced-save fan-out, and
+  executor omission of the whole Orb UI controller. The 799-test affected gate
+  passed. Exact code candidate `7ec154a` passed compilation, state definitions,
+  clickmap integrity with zero errors and the established 44 orphan notices,
+  and all 3,039 repository tests in 481.04 seconds using development-
+  environment fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+- **Fixed by:** `7ec154a`.
+
 ### Home Orb tuple was discarded before live Range confirmation
 
 **Stable ID:** `ISSUE-2026-055` · **Lifecycle:** `resolved`
+
+> **Superseded runtime behavior (2026-08-18):**
+> [`ISSUE-2026-056`](#forced-running-save-was-not-reused-for-live-orb-range)
+> replaces this issue's UI Range confirmation with the already-required forced
+> active-round save. This entry remains the history of the independently valid
+> Home-tuple fix.
 
 - **Observed:** On 2026-08-18 an ordinary Farm new-run preflight decoded the
   exact configured `30.00m / 30.00m / 39.00m` Range/Extra/Workshop tuple from
