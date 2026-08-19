@@ -5,6 +5,7 @@ import pytest
 
 from core.adb_connection import AdbConnectionCoordinator
 from core.app import App
+from core.battle_identity import BattleIdentityStoreError
 from core.ss_capture import ScreenshotCaptureResult, ScreenshotFailure
 
 
@@ -290,6 +291,148 @@ def test_paused_same_port_host_handoff_keeps_observed_battle_attribution():
     evidence = app._terminal_emulator_location("battle-a")
     assert evidence["status"] == "mixed_hosts"
     assert evidence["host_change_count"] == 1
+
+
+def test_active_host_handoff_arms_destination_save_continuity_guard():
+    host_b = _emulator_location(
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "WORKSTATION-B",
+        202,
+    )
+    app = App.__new__(App)
+    app._adb_target_session = Mock()
+    app._adb_target_session.snapshot.side_effect = (
+        SimpleNamespace(
+            target="localhost:5555",
+            generation=7,
+            owned=True,
+        ),
+        SimpleNamespace(
+            target="localhost:5555",
+            generation=8,
+            owned=True,
+        ),
+    )
+    app._current_player_save_observation_context = lambda: None
+    app._observed_active_round_identity_fingerprint = "a" * 64
+    app._control_observation = {
+        "primary_state": "RUNNING",
+        "home_battle_control": "UNKNOWN",
+    }
+    app._last_active_battle_wave_observation = None
+    app._last_wave_value = 900
+    app._last_wave_conf = 99.0
+    app._handoff_adb_port = Mock(return_value=True)
+    app._record_emulator_location = Mock()
+    app._battle_identity_store = Mock()
+    app._battle_identity_store.arm_emulator_handoff_guard.return_value = object()
+
+    assert app._handoff_emulator_location(5555, host_b)
+
+    guard_call = (
+        app._battle_identity_store.arm_emulator_handoff_guard.call_args.kwargs
+    )
+    assert guard_call["identity_fingerprint"] == "a" * 64
+    assert guard_call["source_target_binding"].generation == 7
+    assert guard_call["destination_target_binding"].generation == 8
+    assert guard_call["source_wave"] == 900
+    assert app._emulator_handoff_guard_pending is True
+
+
+def test_home_new_boundary_skips_active_battle_handoff_guard():
+    host_b = _emulator_location(
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "WORKSTATION-B",
+        202,
+    )
+    app = App.__new__(App)
+    app._adb_target_session = Mock()
+    app._adb_target_session.snapshot.side_effect = (
+        SimpleNamespace(
+            target="localhost:5555",
+            generation=7,
+            owned=True,
+        ),
+        SimpleNamespace(
+            target="localhost:5555",
+            generation=8,
+            owned=True,
+        ),
+    )
+    app._current_player_save_observation_context = lambda: None
+    app._observed_active_round_identity_fingerprint = "a" * 64
+    app._control_observation = {
+        "primary_state": "HOME_SCREEN",
+        "home_battle_control": "NEW_BATTLE",
+    }
+    app._handoff_adb_port = Mock(return_value=True)
+    app._record_emulator_location = Mock()
+    app._battle_identity_store = Mock()
+
+    assert app._handoff_emulator_location(5555, host_b)
+
+    app._battle_identity_store.arm_emulator_handoff_guard.assert_not_called()
+    app._record_emulator_location.assert_called_once_with(
+        host_b,
+        active_round_identity=None,
+    )
+
+
+def test_active_handoff_never_moves_target_without_durable_save_guard():
+    host_b = _emulator_location(
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "WORKSTATION-B",
+        202,
+    )
+    app = App.__new__(App)
+    app._adb_target_session = Mock()
+    app._adb_target_session.snapshot.return_value = SimpleNamespace(
+        target="localhost:5555",
+        generation=7,
+        owned=True,
+    )
+    app._current_player_save_observation_context = lambda: None
+    app._observed_active_round_identity_fingerprint = "a" * 64
+    app._control_observation = {"primary_state": "RUNNING"}
+    app._last_active_battle_wave_observation = None
+    app._last_wave_value = 900
+    app._last_wave_conf = 99.0
+    app._handoff_adb_port = Mock(return_value=True)
+    app._battle_identity_store = Mock()
+    app._battle_identity_store.arm_emulator_handoff_guard.side_effect = (
+        BattleIdentityStoreError("write failed")
+    )
+    app._supervisor = Mock()
+
+    with patch("core.app.log"):
+        assert not app._handoff_emulator_location(5555, host_b)
+
+    app._handoff_adb_port.assert_not_called()
+    pause = app._supervisor.pause_for_catastrophic_failure
+    pause.assert_called_once()
+    assert pause.call_args.args[0].value == "save_continuity_lost"
+
+
+def test_pending_handoff_guard_allows_only_forced_save_source_boundaries():
+    app = App.__new__(App)
+    app._emulator_handoff_guard_pending = True
+
+    assert app._emulator_handoff_guard_blocks_state({"state": "UNKNOWN"})
+    assert app._emulator_handoff_guard_blocks_state({"state": "FREE_TICKET"})
+    assert app._emulator_handoff_guard_blocks_state({"state": "GAME_OVER"})
+    assert not app._emulator_handoff_guard_blocks_state({"state": "RUNNING"})
+    assert not app._emulator_handoff_guard_blocks_state(
+        {
+            "state": "HOME_SCREEN",
+            "home_battle_control": "RESUME_BATTLE",
+        }
+    )
+    assert not app._emulator_handoff_guard_blocks_state(
+        {
+            "state": "HOME_SCREEN",
+            "home_battle_control": "NEW_BATTLE",
+        }
+    )
 
 
 def test_paused_target_handoff_waits_for_validation_terminal_claim():

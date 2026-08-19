@@ -291,6 +291,7 @@ BATTLE_ACTION_DISPATCH_TIMEOUT_SECONDS = 20.0
 MAX_FORCED_BATTLE_IDENTITY_ATTEMPTS = 2
 FORCED_BATTLE_IDENTITY_RETRY_COOLDOWN_SECONDS = 30.0
 MAX_EMULATOR_LOCATION_ENTRIES = 64
+EMULATOR_HANDOFF_WAVE_CONFIDENCE_FLOOR = 90.0
 _LIVE_RUN_WHOLE_RATE_FIELDS = (
     "coins_per_hour",
     "cells_per_hour",
@@ -500,6 +501,14 @@ class App:
                 f"not be trusted: {exc}",
                 "WARN",
             )
+        self._emulator_handoff_guard_pending = bool(
+            getattr(
+                self._retained_battle_identity_record,
+                "emulator_handoff_guard",
+                None,
+            )
+        )
+        self._emulator_handoff_guard_warning_logged = False
         self._active_round_identity = None
         self._active_round_identity_fingerprint: Optional[str] = None
         self._battle_identity_reconciliation_required = True
@@ -1583,6 +1592,15 @@ class App:
                 )
             except BattleIdentityStoreError:
                 self._retained_battle_identity_record = None
+            self._emulator_handoff_guard_pending = bool(
+                getattr(
+                    self._retained_battle_identity_record,
+                    "emulator_handoff_guard",
+                    None,
+                )
+            )
+            if not self._emulator_handoff_guard_pending:
+                self._emulator_handoff_guard_warning_logged = False
             save_coordinator = getattr(
                 self,
                 "_player_save_preflight_coordinator",
@@ -1665,6 +1683,8 @@ class App:
                 catastrophic_kind = RuntimeFailureKind.TARGET_OWNERSHIP_LOST
             elif "uncertain" in result.reason:
                 catastrophic_kind = RuntimeFailureKind.INPUT_RESULT_UNCERTAIN
+            elif result.reason.startswith("emulator_handoff_"):
+                catastrophic_kind = RuntimeFailureKind.SAVE_CONTINUITY_LOST
             if catastrophic_kind is not None:
                 self._supervisor.pause_for_catastrophic_failure(
                     catastrophic_kind,
@@ -1822,6 +1842,30 @@ class App:
     ) -> None:
         """Deliver one immutable parsed bundle to every eligible consumer."""
 
+        if context is not None:
+            store = getattr(self, "_battle_identity_store", None)
+            record_progress = getattr(
+                store,
+                "record_progress_checkpoint",
+                None,
+            )
+            if callable(record_progress):
+                try:
+                    record_progress(
+                        identity_fingerprint=(
+                            context.active_round_identity_fingerprint
+                        ),
+                        target_binding=context.target_binding,
+                        acquisition=acquisition,
+                        observed_at=acquisition.captured_at,
+                    )
+                except (BattleIdentityStoreError, OSError):
+                    log(
+                        "[BATTLE_IDENTITY] Active save high-water checkpoint "
+                        "could not be advanced; a later host handoff will "
+                        "retain the last durable checkpoint",
+                        "DEBUG",
+                    )
         monitor = getattr(self, "_perk_save_monitor", None)
         metric_monitor = getattr(self, "_active_run_metric_monitor", None)
         if context is not None and (monitor is not None or metric_monitor is not None):
@@ -11919,6 +11963,8 @@ class App:
                 inactive = False
             else:
                 self._retained_battle_identity_record = None
+                self._emulator_handoff_guard_pending = False
+                self._emulator_handoff_guard_warning_logged = False
                 self._active_round_identity = None
                 self._active_round_identity_fingerprint = None
                 selector = getattr(self, "_run_perk_selector", None)
@@ -17365,6 +17411,34 @@ class App:
                 detected_state = str(
                     detection.get("state") or "UNKNOWN"
                 ).upper()
+                if self._emulator_handoff_guard_blocks_state(detection):
+                    self._update_action_authority(
+                        detection=detection,
+                        holds=(
+                            AuthorityHoldState(
+                                AuthorityHold.BATTLE_IDENTITY,
+                                "destination save continuity must be proved before unrelated UI input",
+                            ),
+                        ),
+                    )
+                    self._publish_action_authority()
+                    if stop_blind_gem_tapper():
+                        self._blind_tapper_suspended = True
+                    if not getattr(
+                        self,
+                        "_emulator_handoff_guard_warning_logged",
+                        False,
+                    ):
+                        log(
+                            "[BATTLE_IDENTITY] Destination save continuity is "
+                            "pending; unrelated modal and recovery input is "
+                            "suppressed until RUNNING, Home Resume, or Home "
+                            "New Battle supplies a forced-save boundary",
+                            "WARN",
+                            console=True,
+                        )
+                        self._emulator_handoff_guard_warning_logged = True
+                    continue
                 if detected_state == "GAME_RESTARTED":
                     if getattr(
                         self,
@@ -19059,10 +19133,35 @@ class App:
         port: int,
         location: Mapping[str, object],
     ) -> bool:
-        """Revalidate a declared Windows host even when its port is unchanged."""
+        """Durably guard an active save, then revalidate one declared host."""
 
         context = self._current_player_save_observation_context()
-        if context is not None:
+        control_observation = getattr(self, "_control_observation", None)
+        inactive_source = bool(
+            isinstance(control_observation, Mapping)
+            and (
+                control_observation.get("primary_state")
+                in {
+                    "GAME_OVER",
+                    "TOURNAMENT_RESULTS",
+                    "WORKSHOP",
+                }
+                or (
+                    control_observation.get("primary_state")
+                    in {"HOME", "HOME_SCREEN"}
+                    and HomeBattleControl.parse(
+                        control_observation.get(
+                            "home_battle_control",
+                            "UNKNOWN",
+                        )
+                    )
+                    is HomeBattleControl.NEW_BATTLE
+                )
+            )
+        )
+        if inactive_source:
+            active_round_identity = None
+        elif context is not None:
             active_round_identity = context.active_round_identity_fingerprint
         else:
             active_round_identity = (
@@ -19076,12 +19175,167 @@ class App:
                 ).strip()
                 or None
             )
+        session = getattr(self, "_adb_target_session", None)
+        try:
+            source_snapshot = session.snapshot() if session is not None else None
+        except Exception:
+            source_snapshot = None
+        source_binding = PlayerSaveTargetBinding.from_snapshot(source_snapshot)
+        identity_is_canonical = bool(
+            isinstance(active_round_identity, str)
+            and len(active_round_identity) == 64
+            and all(
+                character in "0123456789abcdef"
+                for character in active_round_identity
+            )
+        )
+        prepared_guard = None
+        expected_destination_binding = None
+        if (
+            identity_is_canonical
+            and source_binding is not None
+        ):
+            expected_destination_binding = PlayerSaveTargetBinding(
+                f"localhost:{port}",
+                source_binding.generation + 1,
+            )
+            source_wave = None
+            retained_wave = getattr(
+                self,
+                "_last_active_battle_wave_observation",
+                None,
+            )
+            retained_wave_value = (
+                retained_wave.get("value")
+                if (
+                    isinstance(retained_wave, Mapping)
+                    and retained_wave.get(
+                        "active_round_identity_fingerprint"
+                    )
+                    == active_round_identity
+                )
+                else getattr(self, "_last_wave_value", None)
+            )
+            try:
+                retained_wave_confidence = float(
+                    getattr(self, "_last_wave_conf", -1.0)
+                )
+            except (TypeError, ValueError):
+                retained_wave_confidence = -1.0
+            if (
+                type(retained_wave_value) is int
+                and retained_wave_value >= 0
+                and retained_wave_confidence
+                >= EMULATOR_HANDOFF_WAVE_CONFIDENCE_FLOOR
+            ):
+                source_wave = int(retained_wave_value)
+            try:
+                prepared_guard = (
+                    self._battle_identity_store.arm_emulator_handoff_guard(
+                        request_id=str(location.get("request_id") or ""),
+                        identity_fingerprint=active_round_identity,
+                        source_target_binding=source_binding,
+                        destination_target_binding=(
+                            expected_destination_binding
+                        ),
+                        source_wave=source_wave,
+                    )
+                )
+            except (BattleIdentityStoreError, OSError, ValueError) as exc:
+                reason = (
+                    "active-battle emulator handoff could not retain a "
+                    f"source save continuity guard: {exc}"
+                )
+                self._pause_for_emulator_handoff_continuity(reason)
+                return False
+            if prepared_guard is None:
+                self._pause_for_emulator_handoff_continuity(
+                    "active-battle emulator handoff had no retained source "
+                    "identity record to guard"
+                )
+                return False
+
         if not self._handoff_adb_port(port, revalidate_current=True):
+            if (
+                prepared_guard is not None
+                and expected_destination_binding is not None
+            ):
+                try:
+                    cancelled = bool(
+                        self._battle_identity_store.cancel_emulator_handoff_guard(
+                            request_id=str(location.get("request_id") or ""),
+                            destination_target_binding=(
+                                expected_destination_binding
+                            ),
+                        )
+                    )
+                except (BattleIdentityStoreError, OSError, ValueError):
+                    cancelled = False
+                if not cancelled:
+                    self._emulator_handoff_guard_pending = True
+                    self._pause_for_emulator_handoff_continuity(
+                        "failed emulator target validation left its prepared "
+                        "save continuity guard unresolved"
+                    )
             return False
+
+        if prepared_guard is not None:
+            self._emulator_handoff_guard_pending = True
+            self._emulator_handoff_guard_warning_logged = False
+            try:
+                destination_snapshot = (
+                    session.snapshot() if session is not None else None
+                )
+            except Exception:
+                destination_snapshot = None
+            destination_binding = PlayerSaveTargetBinding.from_snapshot(
+                destination_snapshot
+            )
+            if destination_binding != expected_destination_binding:
+                self._pause_for_emulator_handoff_continuity(
+                    "emulator target moved, but its resulting generation did "
+                    "not match the prepared save continuity guard"
+                )
         self._record_emulator_location(
             location,
             active_round_identity=active_round_identity,
         )
+        return True
+
+    def _pause_for_emulator_handoff_continuity(self, reason: str) -> None:
+        """Latch the typed Pause before reporting one unsafe host move."""
+
+        normalized = " ".join(str(reason or "").split())[:512]
+        supervisor = getattr(self, "_supervisor", None)
+        if supervisor is not None:
+            supervisor.pause_for_catastrophic_failure(
+                RuntimeFailureKind.SAVE_CONTINUITY_LOST,
+                reason=normalized,
+            )
+        log(
+            f"[BATTLE_IDENTITY] {normalized}",
+            "ERROR",
+            console=True,
+        )
+
+    def _emulator_handoff_guard_blocks_state(
+        self,
+        detection: Mapping[str, Any],
+    ) -> bool:
+        """Keep unrelated UI routes inert until destination save proof runs."""
+
+        if not getattr(self, "_emulator_handoff_guard_pending", False):
+            return False
+        state = str(detection.get("state") or "UNKNOWN").upper()
+        if state in {"RUNNING", "GAME_RESTARTED"}:
+            return False
+        if state in {"HOME", "HOME_SCREEN"}:
+            return HomeBattleControl.parse(
+                detection.get("home_battle_control", "UNKNOWN")
+            ) not in {
+                HomeBattleControl.RESUME_BATTLE,
+                HomeBattleControl.NEW_BATTLE,
+            }
         return True
 
     def _handoff_adb_port(

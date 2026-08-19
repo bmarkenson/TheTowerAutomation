@@ -387,10 +387,15 @@ path still work:
 3. Wait until the runtime—not merely the button—reports the current Pause
    request as **acknowledged**. The action-authority display must say
    Automation Paused.
-4. Go to **System > Connections** on the source PC and select
+4. If a battle is still active, complete the game's supported cloud-save
+   synchronization on the source PC and wait for its success indication. Do
+   not treat Pause acknowledgement, a recent screenshot, or an automation save
+   checkpoint as proof that the cloud copy was uploaded.
+5. Go to **System > Connections** on the source PC and select
    **Stop ADB forward**. Wait for the ADB reverse-forward panel to say
    **Stopped**. The API tunnel may remain active.
-5. Only after Pause acknowledgement and forward release, close The Tower or
+6. Only after Pause acknowledgement, cloud synchronization when applicable,
+   and forward release, close The Tower or
    BlueStacks on the source PC and close its Control Surface if desired.
 
 This order is deliberate: Pause acknowledgement is easiest to prove while the
@@ -483,6 +488,17 @@ handoff keeps the same managed process and its in-memory Strategy/session state;
 it does not require Stop/Start or Attach merely because the Windows PC changed.
 If the managed process was separately stopped or replaced, follow the normal
 Start/Attach procedure instead of assuming this in-place rule applies.
+
+For an active-battle move, host acknowledgement arms a durable source-save
+high-water guard. The next Enable remains input-blocked until a forced save on
+the destination proves the same active identity with non-regressing save
+revision and wave. A rollback, different active battle, missing comparison, or
+unexpected target latches a catastrophic Pause; do not repeatedly Enable it.
+Repair the cloud state while preserving the Pause, or manually finish/leave the
+old battle and reach Home/New Battle before starting a separate run. If the old
+battle had already ended and the source was at Home/New Battle, the forced
+inactive save closes the old identity and no active-battle handoff guard is
+carried into the new run.
 
 #### Host attribution and CPH consequences
 

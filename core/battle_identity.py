@@ -53,6 +53,15 @@ class BattleIdentityStoreError(RuntimeError):
     """The durable battle-identity record could not be trusted or written."""
 
 
+class BattleIdentityContinuityError(BattleIdentityStoreError):
+    """An active-battle host handoff could not prove save continuity."""
+
+    def __init__(self, reason: str) -> None:
+        normalized = "_".join(str(reason or "").strip().lower().split())
+        self.reason = normalized or "emulator_handoff_continuity_unavailable"
+        super().__init__(self.reason)
+
+
 class BattleIdentityRelation(str, Enum):
     """How one forced active identity relates to retained durable state."""
 
@@ -129,6 +138,165 @@ class ActiveBattleTerminalContinuity:
 
 
 @dataclass(frozen=True)
+class ActiveBattleProgressCheckpoint:
+    """Monotonic save facts retained for one active battle."""
+
+    max_save_revision: int
+    max_current_wave: int
+    updated_at: str
+    target_binding_fingerprint: str
+
+    def __post_init__(self) -> None:
+        try:
+            parsed = datetime.fromisoformat(self.updated_at)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("battle progress checkpoint is invalid") from exc
+        if (
+            type(self.max_save_revision) is not int
+            or self.max_save_revision < 0
+            or type(self.max_current_wave) is not int
+            or self.max_current_wave < 0
+            or parsed.tzinfo is None
+            or _SHA256_RE.fullmatch(self.target_binding_fingerprint) is None
+        ):
+            raise ValueError("battle progress checkpoint is invalid")
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": 1,
+            "max_save_revision": self.max_save_revision,
+            "max_current_wave": self.max_current_wave,
+            "updated_at": self.updated_at,
+            "target_binding_fingerprint": self.target_binding_fingerprint,
+        }
+
+
+@dataclass(frozen=True)
+class ActiveBattleEmulatorHandoffGuard:
+    """One destination that must meet the retained source high-water marks."""
+
+    request_id: str
+    identity_fingerprint: str
+    source_target_binding_fingerprint: str
+    destination_target_binding_fingerprint: str
+    source_save_revision: Optional[int]
+    source_wave: Optional[int]
+    armed_at: str
+    status: str = "armed"
+    failure_reason: Optional[str] = None
+    observed_save_revision: Optional[int] = None
+    observed_wave: Optional[int] = None
+    detected_at: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        try:
+            armed = datetime.fromisoformat(self.armed_at)
+            detected = (
+                datetime.fromisoformat(self.detected_at)
+                if self.detected_at is not None
+                else None
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError("emulator handoff guard is invalid") from exc
+        revision_valid = bool(
+            self.source_save_revision is None
+            or (
+                type(self.source_save_revision) is int
+                and self.source_save_revision >= 0
+            )
+        )
+        wave_valid = bool(
+            self.source_wave is None
+            or (type(self.source_wave) is int and self.source_wave >= 0)
+        )
+        observations_valid = bool(
+            (
+                self.observed_save_revision is None
+                or (
+                    type(self.observed_save_revision) is int
+                    and self.observed_save_revision >= 0
+                )
+            )
+            and (
+                self.observed_wave is None
+                or (
+                    type(self.observed_wave) is int
+                    and self.observed_wave >= 0
+                )
+            )
+        )
+        if (
+            not str(self.request_id or "").strip()
+            or len(self.request_id) > 128
+            or _SHA256_RE.fullmatch(self.identity_fingerprint) is None
+            or _SHA256_RE.fullmatch(
+                self.source_target_binding_fingerprint
+            )
+            is None
+            or _SHA256_RE.fullmatch(
+                self.destination_target_binding_fingerprint
+            )
+            is None
+            or self.source_target_binding_fingerprint
+            == self.destination_target_binding_fingerprint
+            or not revision_valid
+            or not wave_valid
+            or (
+                self.source_save_revision is None
+                and self.source_wave is None
+            )
+            or armed.tzinfo is None
+            or self.status not in {"armed", "blocked"}
+            or not observations_valid
+            or (
+                self.status == "armed"
+                and (
+                    self.failure_reason is not None
+                    or self.detected_at is not None
+                    or self.observed_save_revision is not None
+                    or self.observed_wave is not None
+                )
+            )
+            or (
+                self.status == "blocked"
+                and (
+                    not str(self.failure_reason or "").strip()
+                    or detected is None
+                    or detected.tzinfo is None
+                )
+            )
+        ):
+            raise ValueError("emulator handoff guard is invalid")
+
+    def as_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "schema_version": 1,
+            "request_id": self.request_id,
+            "identity_fingerprint": self.identity_fingerprint,
+            "source_target_binding_fingerprint": (
+                self.source_target_binding_fingerprint
+            ),
+            "destination_target_binding_fingerprint": (
+                self.destination_target_binding_fingerprint
+            ),
+            "source_save_revision": self.source_save_revision,
+            "source_wave": self.source_wave,
+            "armed_at": self.armed_at,
+            "status": self.status,
+        }
+        if self.status == "blocked":
+            payload.update(
+                {
+                    "failure_reason": self.failure_reason,
+                    "observed_save_revision": self.observed_save_revision,
+                    "observed_wave": self.observed_wave,
+                    "detected_at": self.detected_at,
+                }
+            )
+        return payload
+
+
+@dataclass(frozen=True)
 class ActiveBattleIdentityRecord:
     """Validated durable record for the last force-bound active battle."""
 
@@ -154,6 +322,16 @@ class ActiveBattleIdentityRecord:
         repr=False,
     )
     terminal_continuity: Optional[ActiveBattleTerminalContinuity] = field(
+        default=None,
+        repr=False,
+    )
+    progress_checkpoint: Optional[ActiveBattleProgressCheckpoint] = field(
+        default=None,
+        repr=False,
+    )
+    emulator_handoff_guard: Optional[
+        ActiveBattleEmulatorHandoffGuard
+    ] = field(
         default=None,
         repr=False,
     )
@@ -248,6 +426,11 @@ class BattleIdentityStore:
         terminal_continuity = _terminal_continuity_from_acquisition(
             acquisition
         )
+        observed_progress = _progress_checkpoint_from_acquisition(
+            acquisition,
+            identity_fingerprint=normalized_identity.fingerprint,
+            observed_at=bound_at,
+        )
         timestamp = _aware_timestamp(bound_at).isoformat()
 
         with self._lock:
@@ -262,12 +445,32 @@ class BattleIdentityStore:
                 and previous_payload.get("status") == "active"
                 else None
             )
+            if (
+                previous is not None
+                and previous.emulator_handoff_guard is not None
+            ):
+                self._verify_emulator_handoff_guard(
+                    previous_payload,
+                    previous.emulator_handoff_guard,
+                    identity=normalized_identity,
+                    acquisition=acquisition,
+                )
             if previous is None:
                 relation = BattleIdentityRelation.FIRST_OBSERVATION
             elif previous.fingerprint == normalized_identity.fingerprint:
                 relation = BattleIdentityRelation.SAME_BATTLE
             else:
                 relation = BattleIdentityRelation.LATER_BATTLE
+
+            progress_checkpoint = observed_progress
+            if (
+                relation is BattleIdentityRelation.SAME_BATTLE
+                and previous is not None
+            ):
+                progress_checkpoint = _merge_progress_checkpoints(
+                    previous.progress_checkpoint,
+                    observed_progress,
+                )
 
             payload: dict[str, Any] = {
                 "schema_version": BATTLE_IDENTITY_SCHEMA_VERSION,
@@ -281,6 +484,10 @@ class BattleIdentityStore:
             if terminal_continuity is not None:
                 payload["terminal_continuity"] = (
                     terminal_continuity.as_dict()
+                )
+            if progress_checkpoint is not None:
+                payload["progress_checkpoint"] = (
+                    progress_checkpoint.as_dict()
                 )
             if (
                 relation is BattleIdentityRelation.SAME_BATTLE
@@ -302,6 +509,260 @@ class BattleIdentityStore:
                         payload[key] = dict(value)
             self._write_payload(payload)
             return _record_from_payload(payload), relation
+
+    def record_progress_checkpoint(
+        self,
+        *,
+        identity_fingerprint: str,
+        target_binding: PlayerSaveTargetBinding,
+        acquisition: PlayerSaveAcquisitionBundle,
+        observed_at: Optional[datetime] = None,
+    ) -> bool:
+        """Advance active-battle save high-water marks from a shared bundle."""
+
+        expected = str(identity_fingerprint or "").strip()
+        if (
+            _SHA256_RE.fullmatch(expected) is None
+            or not isinstance(target_binding, PlayerSaveTargetBinding)
+            or not isinstance(acquisition, PlayerSaveAcquisitionBundle)
+            or not acquisition.complete
+            or not acquisition.matches_binding(target_binding)
+        ):
+            return False
+        checkpoint = _progress_checkpoint_from_acquisition(
+            acquisition,
+            identity_fingerprint=expected,
+            observed_at=observed_at,
+        )
+        if checkpoint is None:
+            return False
+        with self._lock:
+            payload = self._read_payload()
+            if payload is None or payload.get("status") != "active":
+                return False
+            record = _record_from_payload(payload)
+            if record.fingerprint != expected:
+                return False
+            guard = record.emulator_handoff_guard
+            if guard is not None:
+                # Freeze the captured source marks once handoff preparation
+                # begins. Letting any late passive completion advance them, or
+                # destination evidence replace them, would make the comparison
+                # depend on a scheduler race.
+                return False
+            merged = _merge_progress_checkpoints(
+                record.progress_checkpoint,
+                checkpoint,
+            )
+            if merged == record.progress_checkpoint:
+                return False
+            payload["progress_checkpoint"] = merged.as_dict()
+            self._write_payload(payload)
+            return True
+
+    def arm_emulator_handoff_guard(
+        self,
+        *,
+        request_id: str,
+        identity_fingerprint: str,
+        source_target_binding: PlayerSaveTargetBinding,
+        destination_target_binding: PlayerSaveTargetBinding,
+        source_wave: Optional[int] = None,
+        armed_at: Optional[datetime] = None,
+    ) -> Optional[ActiveBattleEmulatorHandoffGuard]:
+        """Bind one active-battle host move to its source high-water marks."""
+
+        normalized_request = " ".join(str(request_id or "").split())[:128]
+        expected = str(identity_fingerprint or "").strip()
+        normalized_wave = (
+            source_wave
+            if type(source_wave) is int and source_wave >= 0
+            else None
+        )
+        if (
+            not normalized_request
+            or _SHA256_RE.fullmatch(expected) is None
+            or not isinstance(source_target_binding, PlayerSaveTargetBinding)
+            or not isinstance(
+                destination_target_binding,
+                PlayerSaveTargetBinding,
+            )
+            or source_target_binding == destination_target_binding
+        ):
+            raise BattleIdentityContinuityError(
+                "emulator_handoff_guard_context_invalid"
+            )
+        with self._lock:
+            payload = self._read_payload()
+            if payload is None or payload.get("status") != "active":
+                return None
+            record = _record_from_payload(payload)
+            if record.fingerprint != expected:
+                raise BattleIdentityContinuityError(
+                    "emulator_handoff_active_identity_changed"
+                )
+            existing_guard = record.emulator_handoff_guard
+            if existing_guard is not None:
+                if (
+                    existing_guard.status == "armed"
+                    and existing_guard.request_id == normalized_request
+                    and existing_guard.source_target_binding_fingerprint
+                    == source_target_binding.fingerprint
+                    and existing_guard.destination_target_binding_fingerprint
+                    == destination_target_binding.fingerprint
+                ):
+                    return existing_guard
+                raise BattleIdentityContinuityError(
+                    existing_guard.failure_reason
+                    or "emulator_handoff_guard_already_pending"
+                )
+            checkpoint = record.progress_checkpoint
+            revision_floor = (
+                checkpoint.max_save_revision
+                if checkpoint is not None
+                else record.terminal_continuity.save_revision
+                if record.terminal_continuity is not None
+                else None
+            )
+            wave_floor = (
+                checkpoint.max_current_wave
+                if checkpoint is not None
+                else None
+            )
+            if normalized_wave is not None:
+                wave_floor = max(wave_floor or 0, normalized_wave)
+            if revision_floor is None and wave_floor is None:
+                raise BattleIdentityContinuityError(
+                    "emulator_handoff_source_checkpoint_unavailable"
+                )
+            guard = ActiveBattleEmulatorHandoffGuard(
+                request_id=normalized_request,
+                identity_fingerprint=expected,
+                source_target_binding_fingerprint=(
+                    source_target_binding.fingerprint
+                ),
+                destination_target_binding_fingerprint=(
+                    destination_target_binding.fingerprint
+                ),
+                source_save_revision=revision_floor,
+                source_wave=wave_floor,
+                armed_at=_aware_timestamp(armed_at).isoformat(),
+            )
+            payload["emulator_handoff_guard"] = guard.as_dict()
+            self._write_payload(payload)
+            return guard
+
+    def cancel_emulator_handoff_guard(
+        self,
+        *,
+        request_id: str,
+        destination_target_binding: PlayerSaveTargetBinding,
+    ) -> bool:
+        """Remove only an unconsumed guard whose target move did not occur."""
+
+        normalized_request = " ".join(str(request_id or "").split())[:128]
+        if (
+            not normalized_request
+            or not isinstance(
+                destination_target_binding,
+                PlayerSaveTargetBinding,
+            )
+        ):
+            return False
+        with self._lock:
+            payload = self._read_payload()
+            if payload is None or payload.get("status") != "active":
+                return False
+            record = _record_from_payload(payload)
+            guard = record.emulator_handoff_guard
+            if not (
+                guard is not None
+                and guard.status == "armed"
+                and guard.request_id == normalized_request
+                and guard.destination_target_binding_fingerprint
+                == destination_target_binding.fingerprint
+            ):
+                return False
+            payload.pop("emulator_handoff_guard", None)
+            self._write_payload(payload)
+            return True
+
+    def _verify_emulator_handoff_guard(
+        self,
+        payload: dict[str, Any],
+        guard: ActiveBattleEmulatorHandoffGuard,
+        *,
+        identity: ActiveRoundIdentity,
+        acquisition: PlayerSaveAcquisitionBundle,
+    ) -> None:
+        """Consume a guard only after exact destination non-regression."""
+
+        if guard.status == "blocked":
+            raise BattleIdentityContinuityError(
+                guard.failure_reason
+                or "emulator_handoff_save_rollback_detected"
+            )
+        observed_revision, observed_wave = _progress_values_from_acquisition(
+            acquisition,
+            identity_fingerprint=identity.fingerprint,
+        )
+        reason = ""
+        if identity.fingerprint != guard.identity_fingerprint:
+            reason = "emulator_handoff_active_identity_changed"
+        elif (
+            acquisition.binding_fingerprint
+            != guard.destination_target_binding_fingerprint
+        ):
+            reason = "emulator_handoff_destination_changed"
+        elif (
+            guard.source_save_revision is not None
+            and observed_revision is None
+        ):
+            reason = "emulator_handoff_save_revision_unavailable"
+        elif (
+            guard.source_save_revision is not None
+            and observed_revision is not None
+            and observed_revision < guard.source_save_revision
+        ):
+            reason = "emulator_handoff_save_revision_regressed"
+        elif guard.source_wave is not None and observed_wave is None:
+            reason = "emulator_handoff_current_wave_unavailable"
+        elif (
+            guard.source_wave is not None
+            and observed_wave is not None
+            and observed_wave < guard.source_wave
+        ):
+            reason = "emulator_handoff_current_wave_regressed"
+        if not reason:
+            payload.pop("emulator_handoff_guard", None)
+            return
+
+        blocked = ActiveBattleEmulatorHandoffGuard(
+            request_id=guard.request_id,
+            identity_fingerprint=guard.identity_fingerprint,
+            source_target_binding_fingerprint=(
+                guard.source_target_binding_fingerprint
+            ),
+            destination_target_binding_fingerprint=(
+                guard.destination_target_binding_fingerprint
+            ),
+            source_save_revision=guard.source_save_revision,
+            source_wave=guard.source_wave,
+            armed_at=guard.armed_at,
+            status="blocked",
+            failure_reason=reason,
+            observed_save_revision=observed_revision,
+            observed_wave=observed_wave,
+            detected_at=datetime.now(timezone.utc).isoformat(),
+        )
+        payload["emulator_handoff_guard"] = blocked.as_dict()
+        try:
+            self._write_payload(payload)
+        except BattleIdentityStoreError as exc:
+            raise BattleIdentityContinuityError(
+                "emulator_handoff_failure_persistence_failed"
+            ) from exc
+        raise BattleIdentityContinuityError(reason)
 
     def mark_inactive(
         self,
@@ -891,6 +1352,15 @@ class ActiveBattleIdentityCoordinator:
                 acquisition=acquisition,
                 bound_at=acquisition.captured_at,
             )
+        except BattleIdentityContinuityError as exc:
+            return BattleIdentityCheckResult(
+                BattleIdentityCheckStatus.BLOCKED,
+                exc.reason,
+                identity=identity,
+                acquisition=acquisition,
+                source_restored=True,
+                lifecycle_input_attempted=True,
+            )
         except (BattleIdentityStoreError, OSError):
             return BattleIdentityCheckResult(
                 BattleIdentityCheckStatus.UNAVAILABLE,
@@ -1002,6 +1472,8 @@ def _record_from_payload(payload: Mapping[str, Any]) -> ActiveBattleIdentityReco
         )
     )
     terminal_continuity_value = payload.get("terminal_continuity")
+    progress_checkpoint_value = payload.get("progress_checkpoint")
+    emulator_handoff_guard_value = payload.get("emulator_handoff_guard")
     if (
         identity is None
         or parsed.tzinfo is None
@@ -1017,6 +1489,24 @@ def _record_from_payload(payload: Mapping[str, Any]) -> ActiveBattleIdentityReco
     if terminal_continuity_value is not None and terminal_continuity is None:
         raise BattleIdentityStoreError(
             "battle terminal continuity record is malformed"
+        )
+    progress_checkpoint = _validated_progress_checkpoint(
+        progress_checkpoint_value
+    )
+    if progress_checkpoint_value is not None and progress_checkpoint is None:
+        raise BattleIdentityStoreError(
+            "battle progress checkpoint is malformed"
+        )
+    emulator_handoff_guard = _validated_emulator_handoff_guard(
+        emulator_handoff_guard_value,
+        identity_fingerprint=identity.fingerprint,
+    )
+    if (
+        emulator_handoff_guard_value is not None
+        and emulator_handoff_guard is None
+    ):
+        raise BattleIdentityStoreError(
+            "emulator handoff guard is malformed"
         )
     return ActiveBattleIdentityRecord(
         identity=identity,
@@ -1045,7 +1535,165 @@ def _record_from_payload(payload: Mapping[str, Any]) -> ActiveBattleIdentityReco
             else None
         ),
         terminal_continuity=terminal_continuity,
+        progress_checkpoint=progress_checkpoint,
+        emulator_handoff_guard=emulator_handoff_guard,
     )
+
+
+def _progress_values_from_acquisition(
+    acquisition: PlayerSaveAcquisitionBundle,
+    *,
+    identity_fingerprint: str,
+) -> tuple[Optional[int], Optional[int]]:
+    if not (
+        isinstance(acquisition, PlayerSaveAcquisitionBundle)
+        and acquisition.complete
+        and _SHA256_RE.fullmatch(identity_fingerprint) is not None
+    ):
+        return None, None
+    snapshot = acquisition.snapshot
+    runtime = getattr(snapshot, "runtime_save", None)
+    identity = getattr(runtime, "active_round_identity", None)
+    if not (
+        getattr(runtime, "round_active", None) is True
+        and isinstance(identity, ActiveRoundIdentity)
+        and identity.fingerprint == identity_fingerprint
+    ):
+        return None, None
+    runtime_revision = getattr(runtime, "save_revision", None)
+    snapshot_revision = getattr(snapshot, "save_revision", None)
+    save_revision = (
+        runtime_revision
+        if (
+            getattr(runtime, "save_revision_status", None) == "observed"
+            and getattr(runtime, "save_revision_reason", None) == ""
+            and type(runtime_revision) is int
+            and runtime_revision >= 0
+            and snapshot_revision == runtime_revision
+        )
+        else None
+    )
+    runtime_wave = getattr(runtime, "current_wave", None)
+    current_wave = (
+        runtime_wave
+        if (
+            getattr(runtime, "current_wave_status", None) == "observed"
+            and getattr(runtime, "current_wave_reason", None) == ""
+            and type(runtime_wave) is int
+            and runtime_wave >= 0
+        )
+        else None
+    )
+    return save_revision, current_wave
+
+
+def _progress_checkpoint_from_acquisition(
+    acquisition: PlayerSaveAcquisitionBundle,
+    *,
+    identity_fingerprint: str,
+    observed_at: Optional[datetime] = None,
+) -> Optional[ActiveBattleProgressCheckpoint]:
+    save_revision, current_wave = _progress_values_from_acquisition(
+        acquisition,
+        identity_fingerprint=identity_fingerprint,
+    )
+    binding_fingerprint = acquisition.binding_fingerprint
+    if not (
+        save_revision is not None
+        and current_wave is not None
+        and _SHA256_RE.fullmatch(str(binding_fingerprint or "")) is not None
+    ):
+        return None
+    timestamp = observed_at or acquisition.captured_at
+    return ActiveBattleProgressCheckpoint(
+        max_save_revision=save_revision,
+        max_current_wave=current_wave,
+        updated_at=_aware_timestamp(timestamp).isoformat(),
+        target_binding_fingerprint=str(binding_fingerprint),
+    )
+
+
+def _merge_progress_checkpoints(
+    previous: Optional[ActiveBattleProgressCheckpoint],
+    current: Optional[ActiveBattleProgressCheckpoint],
+) -> Optional[ActiveBattleProgressCheckpoint]:
+    if previous is None:
+        return current
+    if current is None:
+        return previous
+    max_revision = max(
+        previous.max_save_revision,
+        current.max_save_revision,
+    )
+    max_wave = max(previous.max_current_wave, current.max_current_wave)
+    if (
+        max_revision == previous.max_save_revision
+        and max_wave == previous.max_current_wave
+    ):
+        return previous
+    return ActiveBattleProgressCheckpoint(
+        max_save_revision=max_revision,
+        max_current_wave=max_wave,
+        updated_at=current.updated_at,
+        target_binding_fingerprint=current.target_binding_fingerprint,
+    )
+
+
+def _validated_progress_checkpoint(
+    value: object,
+) -> Optional[ActiveBattleProgressCheckpoint]:
+    if not isinstance(value, Mapping) or value.get("schema_version") != 1:
+        return None
+    try:
+        return ActiveBattleProgressCheckpoint(
+            max_save_revision=value.get("max_save_revision"),
+            max_current_wave=value.get("max_current_wave"),
+            updated_at=str(value.get("updated_at") or "").strip(),
+            target_binding_fingerprint=str(
+                value.get("target_binding_fingerprint") or ""
+            ).strip(),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _validated_emulator_handoff_guard(
+    value: object,
+    *,
+    identity_fingerprint: str,
+) -> Optional[ActiveBattleEmulatorHandoffGuard]:
+    if not isinstance(value, Mapping) or value.get("schema_version") != 1:
+        return None
+    try:
+        guard = ActiveBattleEmulatorHandoffGuard(
+            request_id=str(value.get("request_id") or "").strip(),
+            identity_fingerprint=str(
+                value.get("identity_fingerprint") or ""
+            ).strip(),
+            source_target_binding_fingerprint=str(
+                value.get("source_target_binding_fingerprint") or ""
+            ).strip(),
+            destination_target_binding_fingerprint=str(
+                value.get("destination_target_binding_fingerprint") or ""
+            ).strip(),
+            source_save_revision=value.get("source_save_revision"),
+            source_wave=value.get("source_wave"),
+            armed_at=str(value.get("armed_at") or "").strip(),
+            status=str(value.get("status") or "").strip(),
+            failure_reason=(
+                str(value.get("failure_reason") or "").strip() or None
+            ),
+            observed_save_revision=value.get("observed_save_revision"),
+            observed_wave=value.get("observed_wave"),
+            detected_at=(
+                str(value.get("detected_at") or "").strip() or None
+            ),
+        )
+    except (TypeError, ValueError):
+        return None
+    if guard.identity_fingerprint != identity_fingerprint:
+        return None
+    return guard
 
 
 def _validated_session_preflight(
@@ -1787,14 +2435,17 @@ def _write_json_atomic(path: Path, payload: Mapping[str, Any]) -> None:
 
 
 __all__ = [
+    "ActiveBattleEmulatorHandoffGuard",
     "ActiveBattleIdentityCoordinator",
     "ActiveBattleIdentityRecord",
+    "ActiveBattleProgressCheckpoint",
     "ActiveBattleTerminalContinuity",
     "BattleIdentityCheckContext",
     "BattleIdentityCheckResult",
     "BattleIdentityCheckStatus",
     "BattleIdentityRelation",
     "BattleIdentityStore",
+    "BattleIdentityContinuityError",
     "BattleIdentityStoreError",
     "durable_terminal_report_evidence_from_record",
     "terminal_run_binding_from_operator_attestation",

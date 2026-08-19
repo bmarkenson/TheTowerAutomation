@@ -90,6 +90,31 @@ within one game version; it does not select or invalidate a capability.
 version bindings. They do not by themselves prove or disprove semantic
 equivalence for a declared capability.
 
+### Active-battle emulator handoff continuity
+
+Every complete forced or shared passive active-battle bundle advances durable
+high-water marks for `saveRevision` and `currentWave` under the exact
+`ActiveRoundIdentity`. An explicit emulator-host selection made while that
+battle is retained arms a one-destination guard from those marks, the old and
+new target generations, and a high-confidence bound Wave observation when one
+is available. Destination passive reads cannot advance the guarded marks.
+
+Before any ordinary battle-bound input resumes, the first forced identity save
+on the selected destination must retain the exact active identity and must not
+regress either available high-water mark. A different identity, target change,
+missing comparable claim, lower revision, or lower wave makes the failure
+sticky and creates the typed catastrophic `save_continuity_lost` Pause. Unknown
+and unrelated modal routes remain input-inert while proof is pending. A fresh
+Home/New Battle forced save proving `round_active=false` instead retires the old
+active record and its guard; this is the normal boundary when the prior battle
+has already ended.
+
+This comparison detects observable rollback; it does not claim an exact write
+time or prove that a cloud upload occurred. A divergent destination snapshot
+whose identity, revision, and wave all happen to be non-regressing is outside
+what the mapped save can distinguish. The operator must still complete the
+game's supported cloud-save synchronization before an active-battle move.
+
 Live cross-channel calibration on game `28.3.1` confirmed that
 `versionNumber: 1073` is the installed application's `versionCode`. At one
 verified new-battle Home boundary, stable save reads agreed with authoritative

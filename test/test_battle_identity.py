@@ -14,6 +14,7 @@ from core.app import App
 from core.battle_activation_tracker import BattleActivationTracker
 from core.battle_identity import (
     ActiveBattleIdentityCoordinator,
+    BattleIdentityContinuityError,
     BattleIdentityCheckContext,
     BattleIdentityCheckResult,
     BattleIdentityCheckStatus,
@@ -73,17 +74,27 @@ def _identity(*, seed: int = 12345, counter: int = 9) -> ActiveRoundIdentity:
 
 def _acquisition(
     identity: ActiveRoundIdentity | None,
+    *,
+    save_revision: int = 100,
+    current_wave: int = 500,
+    target_generation: int = 7,
+    acquisition_type: PlayerSaveAcquisitionType = (
+        PlayerSaveAcquisitionType.FORCED_SERIALIZATION
+    ),
 ) -> PlayerSaveAcquisitionBundle:
     now = datetime.now(timezone.utc)
     vector = _round_counter_vector(identity) if identity is not None else None
     snapshot = SimpleNamespace(
-        save_revision=100,
+        save_revision=save_revision,
         runtime_save=SimpleNamespace(
             round_active=identity is not None,
             active_round_identity=identity,
-            save_revision=100,
+            save_revision=save_revision,
             save_revision_status="observed",
             save_revision_reason="",
+            current_wave=current_wave,
+            current_wave_status="observed",
+            current_wave_reason="",
             round_counter_vector=vector,
             round_counter_vector_status=(
                 "observed" if vector is not None else "unavailable"
@@ -94,10 +105,13 @@ def _acquisition(
         )
     )
     return PlayerSaveAcquisitionBundle(
-        acquisition_type=PlayerSaveAcquisitionType.FORCED_SERIALIZATION,
+        acquisition_type=acquisition_type,
         status=PlayerSaveAcquisitionStatus.COMPLETE,
         reason="stable_player_save_decoded",
-        binding=PlayerSaveTargetBinding("localhost:5555", 7),
+        binding=PlayerSaveTargetBinding(
+            "localhost:5555",
+            target_generation,
+        ),
         acquisition_started_at=now,
         captured_at=now,
         acquisition_completed_at=now,
@@ -215,6 +229,9 @@ def test_store_uses_active_round_identity_for_same_and_later_battles(tmp_path):
     assert record.terminal_continuity is not None
     assert record.terminal_continuity.round_counter_tier_count == 40
     assert record.terminal_continuity.save_revision == 100
+    assert record.progress_checkpoint is not None
+    assert record.progress_checkpoint.max_save_revision == 100
+    assert record.progress_checkpoint.max_current_wave == 500
     assert store.record_session_preflight(
         identity_fingerprint=first.fingerprint,
         strategy="farm_t19",
@@ -241,6 +258,229 @@ def test_store_uses_active_round_identity_for_same_and_later_battles(tmp_path):
     assert relation is BattleIdentityRelation.LATER_BATTLE
     assert later.fingerprint == later_identity.fingerprint
     assert later.session_preflight is None
+
+
+def test_shared_active_save_observations_advance_handoff_high_water(tmp_path):
+    store = BattleIdentityStore(tmp_path / "battle_identity.json")
+    identity = _identity()
+    source = PlayerSaveTargetBinding("localhost:5555", 7)
+    destination = PlayerSaveTargetBinding("localhost:5555", 8)
+    store.bind(
+        identity,
+        reason="battle_started",
+        operation_id="launch-1",
+        acquisition=_acquisition(identity),
+    )
+    passive = _acquisition(
+        identity,
+        save_revision=104,
+        current_wave=540,
+        acquisition_type=PlayerSaveAcquisitionType.PASSIVE_STABLE_READ,
+    )
+
+    assert store.record_progress_checkpoint(
+        identity_fingerprint=identity.fingerprint,
+        target_binding=source,
+        acquisition=passive,
+    )
+    guard = store.arm_emulator_handoff_guard(
+        request_id="move-1",
+        identity_fingerprint=identity.fingerprint,
+        source_target_binding=source,
+        destination_target_binding=destination,
+        source_wave=550,
+    )
+
+    assert guard is not None
+    assert guard.source_save_revision == 104
+    assert guard.source_wave == 550
+    destination_passive = _acquisition(
+        identity,
+        save_revision=999,
+        current_wave=999,
+        target_generation=8,
+        acquisition_type=PlayerSaveAcquisitionType.PASSIVE_STABLE_READ,
+    )
+    assert not store.record_progress_checkpoint(
+        identity_fingerprint=identity.fingerprint,
+        target_binding=destination,
+        acquisition=destination_passive,
+    )
+    retained = store.active()
+    assert retained is not None
+    assert retained.progress_checkpoint is not None
+    assert retained.progress_checkpoint.max_save_revision == 104
+    assert retained.progress_checkpoint.max_current_wave == 540
+
+    accepted, relation = store.bind(
+        identity,
+        reason="destination_reconciliation",
+        operation_id="move-1-check",
+        acquisition=_acquisition(
+            identity,
+            save_revision=105,
+            current_wave=550,
+            target_generation=8,
+        ),
+    )
+
+    assert relation is BattleIdentityRelation.SAME_BATTLE
+    assert accepted.emulator_handoff_guard is None
+    assert accepted.progress_checkpoint is not None
+    assert accepted.progress_checkpoint.max_save_revision == 105
+    assert accepted.progress_checkpoint.max_current_wave == 550
+
+
+@pytest.mark.parametrize(
+    ("save_revision", "current_wave", "expected_reason"),
+    [
+        (99, 520, "emulator_handoff_save_revision_regressed"),
+        (100, 519, "emulator_handoff_current_wave_regressed"),
+    ],
+)
+def test_emulator_handoff_rollback_is_sticky_until_inactive_boundary(
+    tmp_path,
+    save_revision,
+    current_wave,
+    expected_reason,
+):
+    store = BattleIdentityStore(tmp_path / "battle_identity.json")
+    identity = _identity()
+    source = PlayerSaveTargetBinding("localhost:5555", 7)
+    destination = PlayerSaveTargetBinding("localhost:5555", 8)
+    store.bind(
+        identity,
+        reason="battle_started",
+        operation_id="launch-1",
+        acquisition=_acquisition(identity, current_wave=500),
+    )
+    store.arm_emulator_handoff_guard(
+        request_id="move-1",
+        identity_fingerprint=identity.fingerprint,
+        source_target_binding=source,
+        destination_target_binding=destination,
+        source_wave=520,
+    )
+
+    with pytest.raises(BattleIdentityContinuityError, match=expected_reason):
+        store.bind(
+            identity,
+            reason="destination_reconciliation",
+            operation_id="move-1-check",
+            acquisition=_acquisition(
+                identity,
+                save_revision=save_revision,
+                current_wave=current_wave,
+                target_generation=8,
+            ),
+        )
+
+    retained = store.active()
+    assert retained is not None
+    assert retained.emulator_handoff_guard is not None
+    assert retained.emulator_handoff_guard.status == "blocked"
+    assert retained.emulator_handoff_guard.failure_reason == expected_reason
+    with pytest.raises(BattleIdentityContinuityError, match=expected_reason):
+        store.arm_emulator_handoff_guard(
+            request_id="move-2",
+            identity_fingerprint=identity.fingerprint,
+            source_target_binding=destination,
+            destination_target_binding=PlayerSaveTargetBinding(
+                "localhost:5555",
+                9,
+            ),
+        )
+    with pytest.raises(BattleIdentityContinuityError, match=expected_reason):
+        store.bind(
+            identity,
+            reason="destination_reconciliation_retry",
+            operation_id="move-1-check-2",
+            acquisition=_acquisition(
+                identity,
+                save_revision=500,
+                current_wave=1000,
+                target_generation=8,
+            ),
+        )
+
+    store.mark_inactive(
+        reason="home_new_battle",
+        operation_id="home-1",
+        acquisition=_acquisition(
+            None,
+            save_revision=501,
+            current_wave=0,
+            target_generation=8,
+        ),
+    )
+    assert store.active() is None
+
+
+def test_emulator_handoff_rejects_a_different_active_battle(tmp_path):
+    store = BattleIdentityStore(tmp_path / "battle_identity.json")
+    identity = _identity()
+    store.bind(
+        identity,
+        reason="battle_started",
+        operation_id="launch-1",
+        acquisition=_acquisition(identity),
+    )
+    store.arm_emulator_handoff_guard(
+        request_id="move-1",
+        identity_fingerprint=identity.fingerprint,
+        source_target_binding=PlayerSaveTargetBinding("localhost:5555", 7),
+        destination_target_binding=PlayerSaveTargetBinding(
+            "localhost:5555",
+            8,
+        ),
+    )
+    different = _identity(seed=54321, counter=10)
+
+    with pytest.raises(
+        BattleIdentityContinuityError,
+        match="emulator_handoff_active_identity_changed",
+    ):
+        store.bind(
+            different,
+            reason="destination_reconciliation",
+            operation_id="move-1-check",
+            acquisition=_acquisition(
+                different,
+                save_revision=200,
+                current_wave=900,
+                target_generation=8,
+            ),
+        )
+
+
+def test_failed_target_move_can_cancel_only_its_prepared_handoff_guard(tmp_path):
+    store = BattleIdentityStore(tmp_path / "battle_identity.json")
+    identity = _identity()
+    destination = PlayerSaveTargetBinding("localhost:5555", 8)
+    store.bind(
+        identity,
+        reason="battle_started",
+        operation_id="launch-1",
+        acquisition=_acquisition(identity),
+    )
+    store.arm_emulator_handoff_guard(
+        request_id="move-1",
+        identity_fingerprint=identity.fingerprint,
+        source_target_binding=PlayerSaveTargetBinding("localhost:5555", 7),
+        destination_target_binding=destination,
+    )
+
+    assert not store.cancel_emulator_handoff_guard(
+        request_id="different-move",
+        destination_target_binding=destination,
+    )
+    assert store.cancel_emulator_handoff_guard(
+        request_id="move-1",
+        destination_target_binding=destination,
+    )
+    retained = store.active()
+    assert retained is not None
+    assert retained.emulator_handoff_guard is None
 
 
 def test_store_preserves_battle_bound_strategy_and_activation_checkpoint(
@@ -527,12 +767,14 @@ def test_legacy_active_record_without_counter_vector_stays_readable(tmp_path):
     )
     payload = json.loads(path.read_text(encoding="utf-8"))
     payload.pop("terminal_continuity")
+    payload.pop("progress_checkpoint")
     path.write_text(json.dumps(payload), encoding="utf-8")
 
     record = store.active()
 
     assert record is not None
     assert record.terminal_continuity is None
+    assert record.progress_checkpoint is None
     binding = terminal_run_binding_from_round_counters(
         record,
         _terminal_acquisition(identity),
@@ -939,6 +1181,50 @@ def test_coordinator_binds_only_the_forced_active_identity(tmp_path):
     acquire.assert_called_once()
 
 
+def test_coordinator_preserves_typed_handoff_continuity_failure(tmp_path):
+    context = BattleIdentityCheckContext(
+        runtime_session_id="runtime-1",
+        operation_id="move-1-check",
+        target_binding=PlayerSaveTargetBinding("localhost:5555", 8),
+    )
+    coordinator = _coordinator(tmp_path, context)
+    identity = _identity()
+    acquisition = _acquisition(identity, target_generation=8)
+    serialized = GuardedSerializationResult(
+        GuardedSerializationStatus.COMPLETE,
+        "save_acquired",
+        acquisition=acquisition,
+        lifecycle_input_attempted=True,
+        background_dispatched=True,
+        restoration_completed=True,
+    )
+
+    with (
+        patch(
+            "core.battle_identity.GuardedPlayerSaveSerializer.acquire",
+            return_value=serialized,
+        ),
+        patch.object(
+            coordinator._store,
+            "bind",
+            side_effect=BattleIdentityContinuityError(
+                "emulator_handoff_current_wave_regressed"
+            ),
+        ),
+    ):
+        result = coordinator.bind(
+            context=context,
+            action_guard_fn=lambda: True,
+            reason="destination_reconciliation",
+            initial_frame=object(),
+        )
+
+    assert result.status is BattleIdentityCheckStatus.BLOCKED
+    assert result.reason == "emulator_handoff_current_wave_regressed"
+    assert result.source_restored is True
+    assert result.lifecycle_input_attempted is True
+
+
 def test_coordinator_refuses_changed_identity_during_exact_verification(
     tmp_path,
 ):
@@ -1034,6 +1320,8 @@ def test_home_new_battle_requires_forced_inactive_save(tmp_path):
     app._player_save_preflight_session_id = "home-check-1"
     app._player_save_preflight_coordinator = Mock()
     app._flag_recoverable_runtime_failure = Mock()
+    app._emulator_handoff_guard_pending = True
+    app._emulator_handoff_guard_warning_logged = True
     result = PlayerSavePreflightResult(
         PlayerSavePreflightStatus.READY,
         "save_reconciled",
@@ -1049,6 +1337,8 @@ def test_home_new_battle_requires_forced_inactive_save(tmp_path):
     assert bound.ready
     assert app._battle_identity_home_verified_preflight_id == "home-check-1"
     assert app._battle_identity_store.active() is None
+    assert app._emulator_handoff_guard_pending is False
+    assert app._emulator_handoff_guard_warning_logged is False
     app._flag_recoverable_runtime_failure.assert_not_called()
 
 
@@ -1670,13 +1960,21 @@ def test_unrestored_identity_serialization_pauses_before_any_battle_work(
 
 
 @pytest.mark.parametrize(
-    "reason",
+    ("reason", "expected_kind"),
     [
-        "exact_target_ownership_unverified",
-        "restored_target_binding_unverified",
+        ("exact_target_ownership_unverified", "target_ownership_lost"),
+        ("restored_target_binding_unverified", "target_ownership_lost"),
+        (
+            "emulator_handoff_current_wave_regressed",
+            "save_continuity_lost",
+        ),
     ],
 )
-def test_identity_target_loss_is_catastrophic(reason, tmp_path):
+def test_unsafe_identity_continuity_loss_is_catastrophic(
+    reason,
+    expected_kind,
+    tmp_path,
+):
     app = App.__new__(App)
     app._supervisor = Mock(is_paused=False)
     app._supervisor.battle_workflow = {
@@ -1700,8 +1998,14 @@ def test_identity_target_loss_is_catastrophic(reason, tmp_path):
         BattleIdentityCheckResult(
             BattleIdentityCheckStatus.BLOCKED,
             reason,
-            source_restored=(reason.startswith("restored_")),
-            lifecycle_input_attempted=(reason.startswith("restored_")),
+            source_restored=(
+                reason.startswith("restored_")
+                or reason.startswith("emulator_handoff_")
+            ),
+            lifecycle_input_attempted=(
+                reason.startswith("restored_")
+                or reason.startswith("emulator_handoff_")
+            ),
         )
     )
     app._battle_identity_store = BattleIdentityStore(
@@ -1716,7 +2020,7 @@ def test_identity_target_loss_is_catastrophic(reason, tmp_path):
 
     app._supervisor.pause_for_catastrophic_failure.assert_called_once()
     kind = app._supervisor.pause_for_catastrophic_failure.call_args.args[0]
-    assert kind.value == "target_ownership_lost"
+    assert kind.value == expected_kind
     app._flag_recoverable_runtime_failure.assert_not_called()
 
 

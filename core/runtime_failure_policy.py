@@ -26,6 +26,7 @@ class RuntimeFailureKind(str, Enum):
     TARGET_OWNERSHIP_LOST = "target_ownership_lost"
     SOURCE_RESTORATION_LOST = "source_restoration_lost"
     INPUT_RESULT_UNCERTAIN = "input_result_uncertain"
+    SAVE_CONTINUITY_LOST = "save_continuity_lost"
 
 
 class RuntimeFailureDisposition(str, Enum):
@@ -42,6 +43,7 @@ CATASTROPHIC_FAILURE_KINDS = frozenset(
         RuntimeFailureKind.TARGET_OWNERSHIP_LOST,
         RuntimeFailureKind.SOURCE_RESTORATION_LOST,
         RuntimeFailureKind.INPUT_RESULT_UNCERTAIN,
+        RuntimeFailureKind.SAVE_CONTINUITY_LOST,
     }
 )
 
