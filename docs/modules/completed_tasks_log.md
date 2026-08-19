@@ -39,6 +39,28 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-18 Active emulator-handoff save rollback guard
+
+- Exact implementation candidate `2e20c96` retains monotonic active-battle
+  `saveRevision` and `currentWave` checkpoints from shared forced/passive save
+  bundles. An explicit emulator-host move durably prepares an exact
+  source/destination-generation guard before ADB can move; destination passive
+  evidence cannot replace it.
+- The first destination forced identity save must prove the same battle and
+  non-regressing checkpoints before ordinary battle input resumes. Missing,
+  changed, or regressed evidence creates a sticky typed
+  `save_continuity_lost` Pause and suppresses unrelated modal recovery. A
+  forced Home/New Battle inactive save retires the old identity and guard, so
+  an already-ended battle does not constrain its successor.
+- The 351 affected tests covered successful and failed target transactions,
+  revision/wave rollback, different identities, passive-update exclusion,
+  legacy record compatibility, catastrophic policy, and Home-boundary clear.
+  The runtime/persistent-state candidate gate then passed compilation, state
+  definitions, clickmap integrity with zero errors and the established 44
+  orphan notices, and all 3,054 repository tests in 628.51 seconds using
+  development-environment fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+
 ### 2026-08-18 Per-frame Windows battle status
 
 - Exact implementation candidate `a0a8db1` publishes Wave from each accepted
