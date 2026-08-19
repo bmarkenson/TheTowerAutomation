@@ -491,14 +491,16 @@ Start/Attach procedure instead of assuming this in-place rule applies.
 
 For an active-battle move, host acknowledgement arms a durable source-save
 high-water guard. The next Enable remains input-blocked until a forced save on
-the destination proves the same active identity with non-regressing save
-revision and wave. A rollback, different active battle, missing comparison, or
-unexpected target latches a catastrophic Pause; do not repeatedly Enable it.
-Repair the cloud state while preserving the Pause, or manually finish/leave the
-old battle and reach Home/New Battle before starting a separate run. If the old
-battle had already ended and the source was at Home/New Battle, the forced
-inactive save closes the old identity and no active-battle handoff guard is
-carried into the new run.
+the destination proves the same active identity and exact target with a
+non-regressing save revision. The destination wave may be lower because the new
+PC resumes the newest cloud save rather than every local source-PC wave; that
+expected same-battle rollback is accepted. A different active battle, missing
+comparison, revision rollback, or unexpected target latches a catastrophic
+Pause; do not repeatedly Enable it. Repair the cloud state while preserving the
+Pause, or manually finish/leave the old battle and reach Home/New Battle before
+starting a separate run. If the old battle had already ended and the source was
+at Home/New Battle, the forced inactive save closes the old identity and no
+active-battle handoff guard is carried into the new run.
 
 #### Host attribution and CPH consequences
 

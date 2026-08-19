@@ -173,7 +173,7 @@ class ActiveBattleProgressCheckpoint:
 
 @dataclass(frozen=True)
 class ActiveBattleEmulatorHandoffGuard:
-    """One destination that must meet the retained source high-water marks."""
+    """One destination that must prove the retained active battle."""
 
     request_id: str
     identity_fingerprint: str
@@ -382,6 +382,42 @@ class BattleIdentityStore:
             if payload is None or payload.get("status") != "active":
                 return None
             return _record_from_payload(payload)
+
+    def accept_expected_emulator_handoff_wave_rollback(
+        self,
+    ) -> Optional[ActiveBattleEmulatorHandoffGuard]:
+        """Clear one legacy wave-only failure already proved at destination.
+
+        A different PC resumes the newest cloud save, which can be behind the
+        source PC even when ``ActiveRoundIdentity`` proves the same battle.
+        Version 1 originally made that expected wave rollback sticky.  The
+        stored failure reason is ordered evidence that identity, destination,
+        revision availability, and non-regression all passed first.
+        """
+
+        with self._lock:
+            payload = self._read_payload()
+            if payload is None or payload.get("status") != "active":
+                return None
+            record = _record_from_payload(payload)
+            guard = record.emulator_handoff_guard
+            if not (
+                guard is not None
+                and guard.status == "blocked"
+                and guard.failure_reason
+                == "emulator_handoff_current_wave_regressed"
+                and guard.source_wave is not None
+                and guard.observed_wave is not None
+                and guard.observed_wave < guard.source_wave
+                and guard.source_save_revision is not None
+                and guard.observed_save_revision is not None
+                and guard.observed_save_revision
+                >= guard.source_save_revision
+            ):
+                return None
+            payload.pop("emulator_handoff_guard", None)
+            self._write_payload(payload)
+            return guard
 
     def bind(
         self,
@@ -695,7 +731,7 @@ class BattleIdentityStore:
         identity: ActiveRoundIdentity,
         acquisition: PlayerSaveAcquisitionBundle,
     ) -> None:
-        """Consume a guard only after exact destination non-regression."""
+        """Consume a guard after exact destination same-battle proof."""
 
         if guard.status == "blocked":
             raise BattleIdentityContinuityError(
@@ -727,12 +763,10 @@ class BattleIdentityStore:
             reason = "emulator_handoff_save_revision_regressed"
         elif guard.source_wave is not None and observed_wave is None:
             reason = "emulator_handoff_current_wave_unavailable"
-        elif (
-            guard.source_wave is not None
-            and observed_wave is not None
-            and observed_wave < guard.source_wave
-        ):
-            reason = "emulator_handoff_current_wave_regressed"
+        # Wave rollback is expected when another PC opens the most recent
+        # cloud save.  Exact ActiveRoundIdentity is the battle key; the source
+        # and observed waves remain diagnostic progress evidence, not an
+        # identity or action-authority boundary.
         if not reason:
             payload.pop("emulator_handoff_guard", None)
             return

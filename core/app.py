@@ -488,6 +488,20 @@ class App:
         self._battle_identity_store = BattleIdentityStore(
             Path(config.control_file).with_name("battle_identity.json")
         )
+        accepted_handoff_wave_rollback = None
+        try:
+            accepted_handoff_wave_rollback = (
+                self._battle_identity_store
+                .accept_expected_emulator_handoff_wave_rollback()
+            )
+        except BattleIdentityStoreError as exc:
+            # Keep the retained guard authoritative when its correction cannot
+            # be persisted; the ordinary read below will preserve the hold.
+            log(
+                "[BATTLE_IDENTITY] Expected emulator-handoff wave rollback "
+                f"could not be accepted durably: {exc}",
+                "WARN",
+            )
         try:
             self._retained_battle_identity_record = (
                 self._battle_identity_store.active()
@@ -500,6 +514,20 @@ class App:
                 "[BATTLE_IDENTITY] Retained identity was unreadable and will "
                 f"not be trusted: {exc}",
                 "WARN",
+            )
+        if accepted_handoff_wave_rollback is not None:
+            log(
+                "[BATTLE_IDENTITY] Accepted same-battle emulator handoff "
+                "after expected cloud-save wave rollback: "
+                f"source_wave={accepted_handoff_wave_rollback.source_wave} "
+                "destination_wave="
+                f"{accepted_handoff_wave_rollback.observed_wave} "
+                "source_save_revision="
+                f"{accepted_handoff_wave_rollback.source_save_revision} "
+                "destination_save_revision="
+                f"{accepted_handoff_wave_rollback.observed_save_revision}",
+                "INFO",
+                console=True,
             )
         self._emulator_handoff_guard_pending = bool(
             getattr(

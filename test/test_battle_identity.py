@@ -331,18 +331,46 @@ def test_shared_active_save_observations_advance_handoff_high_water(tmp_path):
     assert accepted.progress_checkpoint.max_current_wave == 550
 
 
-@pytest.mark.parametrize(
-    ("save_revision", "current_wave", "expected_reason"),
-    [
-        (99, 520, "emulator_handoff_save_revision_regressed"),
-        (100, 519, "emulator_handoff_current_wave_regressed"),
-    ],
-)
-def test_emulator_handoff_rollback_is_sticky_until_inactive_boundary(
+def test_emulator_handoff_accepts_expected_same_battle_wave_rollback(tmp_path):
+    store = BattleIdentityStore(tmp_path / "battle_identity.json")
+    identity = _identity()
+    source = PlayerSaveTargetBinding("localhost:5555", 7)
+    destination = PlayerSaveTargetBinding("localhost:5555", 8)
+    store.bind(
+        identity,
+        reason="battle_started",
+        operation_id="launch-1",
+        acquisition=_acquisition(identity, current_wave=500),
+    )
+    store.arm_emulator_handoff_guard(
+        request_id="move-1",
+        identity_fingerprint=identity.fingerprint,
+        source_target_binding=source,
+        destination_target_binding=destination,
+        source_wave=520,
+    )
+
+    accepted, relation = store.bind(
+        identity,
+        reason="destination_reconciliation",
+        operation_id="move-1-check",
+        acquisition=_acquisition(
+            identity,
+            save_revision=101,
+            current_wave=480,
+            target_generation=8,
+        ),
+    )
+
+    assert relation is BattleIdentityRelation.SAME_BATTLE
+    assert accepted.emulator_handoff_guard is None
+    assert accepted.progress_checkpoint is not None
+    assert accepted.progress_checkpoint.max_save_revision == 101
+    assert accepted.progress_checkpoint.max_current_wave == 500
+
+
+def test_emulator_handoff_save_revision_rollback_is_sticky_until_inactive_boundary(
     tmp_path,
-    save_revision,
-    current_wave,
-    expected_reason,
 ):
     store = BattleIdentityStore(tmp_path / "battle_identity.json")
     identity = _identity()
@@ -362,6 +390,7 @@ def test_emulator_handoff_rollback_is_sticky_until_inactive_boundary(
         source_wave=520,
     )
 
+    expected_reason = "emulator_handoff_save_revision_regressed"
     with pytest.raises(BattleIdentityContinuityError, match=expected_reason):
         store.bind(
             identity,
@@ -369,8 +398,8 @@ def test_emulator_handoff_rollback_is_sticky_until_inactive_boundary(
             operation_id="move-1-check",
             acquisition=_acquisition(
                 identity,
-                save_revision=save_revision,
-                current_wave=current_wave,
+                save_revision=99,
+                current_wave=520,
                 target_generation=8,
             ),
         )
@@ -414,6 +443,90 @@ def test_emulator_handoff_rollback_is_sticky_until_inactive_boundary(
         ),
     )
     assert store.active() is None
+
+
+def test_legacy_wave_only_handoff_failure_is_accepted_once(tmp_path):
+    path = tmp_path / "battle_identity.json"
+    store = BattleIdentityStore(path)
+    identity = _identity()
+    store.bind(
+        identity,
+        reason="battle_started",
+        operation_id="launch-1",
+        acquisition=_acquisition(identity, current_wave=500),
+    )
+    store.arm_emulator_handoff_guard(
+        request_id="move-1",
+        identity_fingerprint=identity.fingerprint,
+        source_target_binding=PlayerSaveTargetBinding("localhost:5555", 7),
+        destination_target_binding=PlayerSaveTargetBinding(
+            "localhost:5555",
+            8,
+        ),
+        source_wave=520,
+    )
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["emulator_handoff_guard"].update(
+        {
+            "status": "blocked",
+            "failure_reason": "emulator_handoff_current_wave_regressed",
+            "observed_save_revision": 101,
+            "observed_wave": 500,
+            "detected_at": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    accepted = store.accept_expected_emulator_handoff_wave_rollback()
+
+    assert accepted is not None
+    assert accepted.source_wave == 520
+    assert accepted.observed_wave == 500
+    retained = store.active()
+    assert retained is not None
+    assert retained.emulator_handoff_guard is None
+    assert store.accept_expected_emulator_handoff_wave_rollback() is None
+
+
+def test_legacy_revision_regression_failure_remains_blocked(tmp_path):
+    path = tmp_path / "battle_identity.json"
+    store = BattleIdentityStore(path)
+    identity = _identity()
+    store.bind(
+        identity,
+        reason="battle_started",
+        operation_id="launch-1",
+        acquisition=_acquisition(identity),
+    )
+    store.arm_emulator_handoff_guard(
+        request_id="move-1",
+        identity_fingerprint=identity.fingerprint,
+        source_target_binding=PlayerSaveTargetBinding("localhost:5555", 7),
+        destination_target_binding=PlayerSaveTargetBinding(
+            "localhost:5555",
+            8,
+        ),
+    )
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["emulator_handoff_guard"].update(
+        {
+            "status": "blocked",
+            "failure_reason": "emulator_handoff_save_revision_regressed",
+            "observed_save_revision": 99,
+            "observed_wave": 500,
+            "detected_at": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    assert store.accept_expected_emulator_handoff_wave_rollback() is None
+    retained = store.active()
+    assert retained is not None
+    assert retained.emulator_handoff_guard is not None
+    assert (
+        retained.emulator_handoff_guard.failure_reason
+        == "emulator_handoff_save_revision_regressed"
+    )
 
 
 def test_emulator_handoff_rejects_a_different_active_battle(tmp_path):

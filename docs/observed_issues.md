@@ -291,9 +291,12 @@ current runtime state.
   indefinite Pause, new-target validation, and failure rollback to the old target.
   The explicit Windows host selector also revalidates an unchanged port, records
   host transitions, and excludes partial/mixed-host runs from host-specific CPH.
+  The first active same-port move also proved that a destination can resume an
+  older wave from cloud while retaining the exact canonical battle identity;
+  wave rollback alone must not reject that handoff.
 - Load the [dossier](issues/open-2026.md#live-adb-target-move-could-not-be-applied-by-a-paused-runtime)
-  before a real move, recurrence, or handoff change. Next: deploy and verify one
-  explicitly selected emulator move, including same-port reuse when applicable;
+  before a real move, recurrence, or handoff change. Next: deploy the wave-
+  rollback correction and verify the retained same-battle handoff resumes;
   [operator-control backlog](backlog/runtime-and-validation.md#agreed-operator-control-sequence).
 
 ### Saved GUI ADB port was ignored by an outdated installed systemd unit

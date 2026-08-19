@@ -125,9 +125,10 @@ them.
 Automatic Pause is reserved for catastrophic safety failures: lost/corrupt
 control authority, lost exact-target ownership, failure to prove source
 restoration after lifecycle input, a dispatched input whose result is
-uncertain, or failure to prove non-regressing active-save continuity after an
-emulator-host handoff. Explicit operator Pause, Stop, and Take Manual Control
-are separate intent. See
+uncertain, or failure to prove exact same-battle active-save continuity after
+an emulator-host handoff. A destination wave rollback alone is expected when
+the new PC resumes its newest cloud save. Explicit operator Pause, Stop, and
+Take Manual Control are separate intent. See
 [`architecture/runtime.md`](../architecture/runtime.md#global-runtime-failure-policy).
 
 Low-level ADB mutations and screenshots have bounded subprocess timeouts.

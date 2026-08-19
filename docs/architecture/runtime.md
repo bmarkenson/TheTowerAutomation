@@ -1438,8 +1438,9 @@ Only five catastrophic classes may automatically persist `PAUSED`:
 - a lifecycle input was attempted and the original source cannot be proved
   restored; or
 - an input was dispatched but its result cannot be determined safely; or
-- an active-battle emulator handoff cannot prove non-regressing save
-  continuity on its exact destination.
+- an active-battle emulator handoff cannot prove exact same-battle save
+  continuity on its destination; expected cloud-save wave rollback alone does
+  not fail that proof.
 
 Explicit operator Pause, Stop, and Take Manual Control remain separate intent,
 not failure handling. A bounded exclusive owner may still hold input while its
@@ -1537,8 +1538,9 @@ Take Manual Control, and Stop remain operator boundaries. Changed workflow or
 target ownership, unproved restoration after lifecycle input, and uncertain
 input results are catastrophic safety boundaries and may Pause automatically.
 An active-battle emulator handoff whose destination identity, save revision,
-wave, or target fails its retained source guard is the corresponding save-
-continuity catastrophe.
+or target fails its retained source guard is the corresponding save-continuity
+catastrophe. Destination wave rollback alone is expected when another PC loads
+the newest cloud save and does not change the canonical battle identity.
 
 Daily Gem and mission collectors claim an exclusive auxiliary-route lease from
 a freshly detected same-battle `RUNNING` frame before their first input. While
