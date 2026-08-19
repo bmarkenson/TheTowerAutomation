@@ -1893,7 +1893,8 @@
         "6": "Vampire",
         "8": "Scatter",
         "99": "Surrender",
-        "9": "Ray"
+        "9": "Ray",
+        "4": "Ranged"
       },
       "integer_fields": [
         "adGemsThisRound",
