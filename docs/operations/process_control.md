@@ -124,9 +124,10 @@ them.
 
 Automatic Pause is reserved for catastrophic safety failures: lost/corrupt
 control authority, lost exact-target ownership, failure to prove source
-restoration after lifecycle input, or a dispatched input whose result is
-uncertain. Explicit operator Pause, Stop, and Take Manual Control are separate
-intent. See
+restoration after lifecycle input, a dispatched input whose result is
+uncertain, or failure to prove non-regressing active-save continuity after an
+emulator-host handoff. Explicit operator Pause, Stop, and Take Manual Control
+are separate intent. See
 [`architecture/runtime.md`](../architecture/runtime.md#global-runtime-failure-policy).
 
 Low-level ADB mutations and screenshots have bounded subprocess timeouts.

@@ -1431,13 +1431,15 @@ battle degraded. `WAIT` is not overridden, `HOME` grants no automatic launch,
 and reporting-only or other non-configuration warnings do not manufacture Home
 repair work.
 
-Only four catastrophic classes may automatically persist `PAUSED`:
+Only five catastrophic classes may automatically persist `PAUSED`:
 
 - control authority is lost or corrupt;
 - ownership of the exact ADB target is lost;
 - a lifecycle input was attempted and the original source cannot be proved
   restored; or
-- an input was dispatched but its result cannot be determined safely.
+- an input was dispatched but its result cannot be determined safely; or
+- an active-battle emulator handoff cannot prove non-regressing save
+  continuity on its exact destination.
 
 Explicit operator Pause, Stop, and Take Manual Control remain separate intent,
 not failure handling. A bounded exclusive owner may still hold input while its
@@ -1534,6 +1536,9 @@ Tournament Results dismissal follows the same retry rule. Explicit Pause,
 Take Manual Control, and Stop remain operator boundaries. Changed workflow or
 target ownership, unproved restoration after lifecycle input, and uncertain
 input results are catastrophic safety boundaries and may Pause automatically.
+An active-battle emulator handoff whose destination identity, save revision,
+wave, or target fails its retained source guard is the corresponding save-
+continuity catastrophe.
 
 Daily Gem and mission collectors claim an exclusive auxiliary-route lease from
 a freshly detected same-battle `RUNNING` frame before their first input. While
