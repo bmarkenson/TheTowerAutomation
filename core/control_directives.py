@@ -59,6 +59,10 @@ from core.strategy_profiles import (
 VALID_STATES = frozenset({"RUNNING", "PAUSED", "STOPPED"})
 VALID_MODES = frozenset({"NEXT_BATTLE", "WAIT", "HOME"})
 LEGACY_MODE_ALIASES = {"RETRY": "NEXT_BATTLE"}
+DEFAULT_IDLE_TIMEOUT_SECONDS = 30 * 60
+DEFAULT_IDLE_TIMEOUT_STRATEGY = "farm_t19_ad_assist"
+TERMINAL_IDLE_TIMEOUT_SCHEMA_VERSION = 1
+TERMINAL_IDLE_TIMEOUT_STATUSES = frozenset({"holding", "returning_home"})
 VALID_GAME_SPEED_TARGETS = tuple(
     [step / 2 for step in range(13)] + [6.3]
 )
@@ -86,6 +90,51 @@ INTERACTIVE_DEVELOPMENT_REQUEST_STATES = frozenset(
 )
 _MAX_EXCLUSIVE_VALIDATION_RECEIPTS = 12
 EMULATOR_LOCATION_SCHEMA_VERSION = 1
+
+
+def normalize_terminal_idle_timeout(value: object) -> Optional[dict[str, Any]]:
+    """Validate one exact-request terminal/Home timeout hold."""
+
+    if not isinstance(value, Mapping):
+        return None
+    if value.get("schema_version") != TERMINAL_IDLE_TIMEOUT_SCHEMA_VERSION:
+        return None
+    request_id = str(value.get("request_id") or "").strip()
+    state_request_id = str(value.get("state_request_id") or "").strip()
+    mode_request_id = str(value.get("mode_request_id") or "").strip()
+    policy = str(value.get("policy") or "").strip().upper()
+    status = str(value.get("status") or "").strip().lower()
+    strategy = normalize_strategy_id(value.get("strategy"))
+    expires_at = _finite_number(value.get("expires_at"))
+    evidence = validate_workflow_evidence(value.get("evidence"))
+    if (
+        not request_id
+        or len(request_id) > 128
+        or not state_request_id
+        or len(state_request_id) > 128
+        or not mode_request_id
+        or len(mode_request_id) > 128
+        or policy not in {"WAIT", "HOME"}
+        or status not in TERMINAL_IDLE_TIMEOUT_STATUSES
+        or strategy is None
+        or expires_at is None
+        or evidence is None
+        or evidence.get("game_state")
+        not in {"game_over", "tournament_results", "home_new_battle"}
+    ):
+        return None
+    return {
+        "schema_version": TERMINAL_IDLE_TIMEOUT_SCHEMA_VERSION,
+        "request_id": request_id,
+        "state_request_id": state_request_id,
+        "mode_request_id": mode_request_id,
+        "policy": policy,
+        "status": status,
+        "strategy": strategy,
+        "activated_at": value.get("activated_at"),
+        "expires_at": expires_at,
+        "evidence": evidence,
+    }
 
 
 def _emulator_location_text(value: object, maximum: int) -> Optional[str]:
@@ -278,6 +327,15 @@ class ControlDirectiveStore:
         remaining_seconds = None
         if resume_at is not None:
             remaining_seconds = max(0, round(resume_at - current_time))
+        terminal_idle_timeout = normalize_terminal_idle_timeout(
+            data.get("terminal_idle_timeout")
+        )
+        terminal_idle_remaining_seconds = None
+        if terminal_idle_timeout is not None:
+            terminal_idle_remaining_seconds = max(
+                0,
+                round(terminal_idle_timeout["expires_at"] - current_time),
+            )
         return {
             "state": state,
             "mode": mode,
@@ -290,6 +348,18 @@ class ControlDirectiveStore:
             "state_request_id": data.get("state_request_id"),
             "mode_updated_at": data.get("mode_updated_at"),
             "mode_request_id": data.get("mode_request_id"),
+            "idle_timeout_seconds": DEFAULT_IDLE_TIMEOUT_SECONDS,
+            "idle_timeout_strategy": DEFAULT_IDLE_TIMEOUT_STRATEGY,
+            "terminal_idle_timeout": terminal_idle_timeout,
+            "terminal_idle_remaining_seconds": (
+                terminal_idle_remaining_seconds
+            ),
+            "terminal_idle_timeout_error": (
+                "terminal idle-timeout directive is malformed"
+                if data.get("terminal_idle_timeout") is not None
+                and terminal_idle_timeout is None
+                else None
+            ),
             "game_speed_target": _valid_game_speed_target(
                 data.get("game_speed_target")
             ),
@@ -479,6 +549,7 @@ class ControlDirectiveStore:
         *,
         evidence: Mapping[str, object],
         strategy: Optional[str] = None,
+        terminal_idle_timeout_request_id: Optional[str] = None,
         process_restart_handoff_id: Optional[str] = None,
         source: Optional[str] = None,
         now: Optional[float] = None,
@@ -504,6 +575,16 @@ class ControlDirectiveStore:
         normalized_restart_handoff_id = (
             str(process_restart_handoff_id or "").strip() or None
         )
+        normalized_terminal_timeout_id = (
+            str(terminal_idle_timeout_request_id or "").strip() or None
+        )
+        if (
+            normalized_terminal_timeout_id is not None
+            and normalized_intent != "start_battle"
+        ):
+            raise ValueError(
+                "A terminal idle timeout may authorize only Start Battle"
+            )
         if (
             normalized_restart_handoff_id is not None
             and normalized_intent != "attach_battle"
@@ -524,6 +605,34 @@ class ControlDirectiveStore:
             )
 
         def mutate(data: dict[str, Any]) -> dict[str, Any]:
+            terminal_timeout = None
+            if normalized_terminal_timeout_id is not None:
+                terminal_timeout = normalize_terminal_idle_timeout(
+                    data.get("terminal_idle_timeout")
+                )
+                current_time = (
+                    float(now)
+                    if now is not None
+                    else datetime.now().timestamp()
+                )
+                if (
+                    terminal_timeout is None
+                    or terminal_timeout["request_id"]
+                    != normalized_terminal_timeout_id
+                    or terminal_timeout["expires_at"] > current_time
+                    or str(data.get("state") or "").strip().upper()
+                    != "RUNNING"
+                    or str(data.get("state_request_id") or "").strip()
+                    != terminal_timeout["state_request_id"]
+                    or str(data.get("mode_request_id") or "").strip()
+                    != terminal_timeout["mode_request_id"]
+                    or normalized_evidence.get("game_state")
+                    != "home_new_battle"
+                    or normalized_strategy != terminal_timeout["strategy"]
+                ):
+                    raise ValueError(
+                        "Terminal idle timeout no longer authorizes this Start"
+                    )
             raw_current = data.get("battle_workflow")
             current = validate_battle_workflow(raw_current)
             if raw_current is not None and current is None:
@@ -649,6 +758,11 @@ class ControlDirectiveStore:
                     workflow_strategy_definition_fingerprint
                 )
             data["battle_workflow"] = workflow
+            if terminal_timeout is not None:
+                data["mode"] = "NEXT_BATTLE"
+                data["mode_updated_at"] = timestamp
+                data["mode_request_id"] = uuid4().hex
+                data.pop("terminal_idle_timeout", None)
             if restart_handoff is not None:
                 restart_handoff["workflow_id"] = workflow["request_id"]
                 restart_handoff["updated_at"] = timestamp
@@ -877,6 +991,7 @@ class ControlDirectiveStore:
             data["manual_control"] = manual
             data["state"] = "PAUSED"
             data.pop("resume_at", None)
+            data.pop("terminal_idle_timeout", None)
             data["state_updated_at"] = timestamp
             data["state_request_id"] = uuid4().hex
             data["updated_at"] = timestamp
@@ -1948,6 +2063,7 @@ class ControlDirectiveStore:
             timestamp = _updated_at()
             data["state"] = normalized
             data.pop("resume_at", None)
+            data.pop("terminal_idle_timeout", None)
             if deadline is not None:
                 data["resume_at"] = deadline
             data["updated_at"] = timestamp
@@ -1978,6 +2094,7 @@ class ControlDirectiveStore:
             timestamp = _updated_at()
             data["state"] = "PAUSED"
             data.pop("resume_at", None)
+            data.pop("terminal_idle_timeout", None)
             if deadline is not None:
                 data["resume_at"] = deadline
             data["updated_at"] = timestamp
@@ -2078,6 +2195,7 @@ class ControlDirectiveStore:
                     data["process_restart_handoff"] = handoff
             data["state"] = normalized
             data.pop("resume_at", None)
+            data.pop("terminal_idle_timeout", None)
             data["state_updated_at"] = timestamp
             data["state_request_id"] = uuid4().hex
             data["updated_at"] = timestamp
@@ -2272,6 +2390,7 @@ class ControlDirectiveStore:
         def mutate(data: dict[str, Any]) -> dict[str, Any]:
             timestamp = _updated_at()
             data["mode"] = normalized
+            data.pop("terminal_idle_timeout", None)
             data["updated_at"] = timestamp
             data["mode_updated_at"] = timestamp
             data["mode_request_id"] = uuid4().hex
@@ -2284,6 +2403,139 @@ class ControlDirectiveStore:
         # authorized by the previous policy can begin.
         with self._dispatch_boundary():
             return self.update(mutate)
+
+    def activate_terminal_idle_timeout(
+        self,
+        *,
+        evidence: Mapping[str, object],
+        timeout_seconds: float = DEFAULT_IDLE_TIMEOUT_SECONDS,
+        strategy: str = DEFAULT_IDLE_TIMEOUT_STRATEGY,
+        source: str = "runtime-terminal-idle-timeout",
+        now: Optional[float] = None,
+    ) -> Optional[dict[str, Any]]:
+        """Arm one timeout only for the current RUNNING Wait/Home request."""
+
+        normalized_evidence = validate_workflow_evidence(evidence)
+        if normalized_evidence is None or normalized_evidence.get(
+            "game_state"
+        ) not in {"game_over", "tournament_results", "home_new_battle"}:
+            raise ValueError(
+                "Terminal idle timeout requires fresh terminal or Home New evidence"
+            )
+        normalized_strategy = str(strategy or "").strip().lower()
+        if not is_configurable_strategy(
+            normalized_strategy,
+            self.strategy_profile_dir,
+            allow_legacy_aliases=False,
+        ):
+            raise ValueError("Terminal idle timeout strategy is unavailable")
+        try:
+            duration = float(timeout_seconds)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Terminal idle timeout must be numeric") from exc
+        if not math.isfinite(duration) or duration <= 0:
+            raise ValueError("Terminal idle timeout must be positive")
+        current_time = (
+            float(now) if now is not None else datetime.now().timestamp()
+        )
+
+        def mutate(data: dict[str, Any]) -> dict[str, Any]:
+            state = str(data.get("state") or "").strip().upper()
+            policy = normalize_automation_mode(data.get("mode"))
+            state_request_id = str(
+                data.get("state_request_id") or ""
+            ).strip()
+            mode_request_id = str(data.get("mode_request_id") or "").strip()
+            if (
+                state != "RUNNING"
+                or policy not in {"WAIT", "HOME"}
+                or not state_request_id
+                or not mode_request_id
+            ):
+                data.pop("terminal_idle_timeout", None)
+                return data
+            existing = normalize_terminal_idle_timeout(
+                data.get("terminal_idle_timeout")
+            )
+            if (
+                existing is not None
+                and existing["state_request_id"] == state_request_id
+                and existing["mode_request_id"] == mode_request_id
+                and existing["policy"] == policy
+                and existing["strategy"] == normalized_strategy
+            ):
+                return data
+            timestamp = _timestamp_at(current_time)
+            data["terminal_idle_timeout"] = {
+                "schema_version": TERMINAL_IDLE_TIMEOUT_SCHEMA_VERSION,
+                "request_id": uuid4().hex,
+                "state_request_id": state_request_id,
+                "mode_request_id": mode_request_id,
+                "policy": policy,
+                "status": "holding",
+                "strategy": normalized_strategy,
+                "activated_at": timestamp,
+                "expires_at": current_time + duration,
+                "evidence": normalized_evidence,
+            }
+            data["updated_at"] = timestamp
+            data["updated_by"] = source
+            return data
+
+        with self._dispatch_boundary():
+            saved = self.update(mutate)
+        return normalize_terminal_idle_timeout(
+            saved.get("terminal_idle_timeout")
+        )
+
+    def advance_expired_terminal_idle_timeout_to_home(
+        self,
+        request_id: str,
+        *,
+        source: str = "runtime-terminal-idle-timeout",
+        now: Optional[float] = None,
+    ) -> Optional[dict[str, Any]]:
+        """Atomically turn an expired terminal Wait into a guarded Home route."""
+
+        expected_request_id = str(request_id or "").strip()
+        current_time = (
+            float(now) if now is not None else datetime.now().timestamp()
+        )
+
+        def mutate(data: dict[str, Any]) -> dict[str, Any]:
+            hold = normalize_terminal_idle_timeout(
+                data.get("terminal_idle_timeout")
+            )
+            if (
+                hold is None
+                or hold["request_id"] != expected_request_id
+                or hold["expires_at"] > current_time
+                or str(data.get("state") or "").strip().upper() != "RUNNING"
+                or str(data.get("state_request_id") or "").strip()
+                != hold["state_request_id"]
+                or str(data.get("mode_request_id") or "").strip()
+                != hold["mode_request_id"]
+            ):
+                return data
+            timestamp = _timestamp_at(current_time)
+            mode_request_id = uuid4().hex
+            data["mode"] = "HOME"
+            data["mode_updated_at"] = timestamp
+            data["mode_request_id"] = mode_request_id
+            data["terminal_idle_timeout"] = {
+                **hold,
+                "mode_request_id": mode_request_id,
+                "status": "returning_home",
+            }
+            data["updated_at"] = timestamp
+            data["updated_by"] = source
+            return data
+
+        with self._dispatch_boundary():
+            saved = self.update(mutate)
+        return normalize_terminal_idle_timeout(
+            saved.get("terminal_idle_timeout")
+        )
 
     def set_game_speed_target(
         self,

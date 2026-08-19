@@ -27,7 +27,11 @@ from core.app import App
 from core.automation_supervisor import AutomationSupervisor
 from core.battle_identity import BattleIdentityRelation
 from core.battle_lifecycle import HomeBattleControl
-from core.control_directives import ControlDirectiveStore
+from core.control_directives import (
+    DEFAULT_IDLE_TIMEOUT_SECONDS,
+    DEFAULT_IDLE_TIMEOUT_STRATEGY,
+    ControlDirectiveStore,
+)
 from core.dispatch_control_boundary import dispatch_control_boundary
 from core.control_model import (
     build_home_ui_reconciliation_receipt,
@@ -85,6 +89,79 @@ def _restore_automation_control():
 
 def _timestamp() -> str:
     return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+
+
+def test_terminal_idle_timeout_routes_home_then_requests_fallback_start(
+    tmp_path,
+):
+    assert DEFAULT_IDLE_TIMEOUT_STRATEGY == "farm_t19_ad_assist"
+    store = ControlDirectiveStore(tmp_path / "automation_ctl.json")
+    state = store.set_state("RUNNING", source="test")
+    mode = store.set_mode("WAIT", source="test")
+
+    hold = store.activate_terminal_idle_timeout(
+        evidence=_evidence(game_state="game_over"),
+        strategy="farm_t19",
+        now=1_000.0,
+    )
+
+    assert hold is not None
+    assert hold["state_request_id"] == state["state_request_id"]
+    assert hold["mode_request_id"] == mode["mode_request_id"]
+    assert hold["strategy"] == "farm_t19"
+    assert hold["expires_at"] == 1_000.0 + DEFAULT_IDLE_TIMEOUT_SECONDS
+    assert store.status(now=1_001.0)["terminal_idle_remaining_seconds"] == (
+        DEFAULT_IDLE_TIMEOUT_SECONDS - 1
+    )
+
+    assert store.advance_expired_terminal_idle_timeout_to_home(
+        hold["request_id"],
+        now=hold["expires_at"] - 1,
+    )["status"] == "holding"
+    returning_home = store.advance_expired_terminal_idle_timeout_to_home(
+        hold["request_id"],
+        now=hold["expires_at"],
+    )
+    assert returning_home is not None
+    assert returning_home["status"] == "returning_home"
+    assert store.status()["mode"] == "HOME"
+
+    workflow = store.request_battle_workflow(
+        "start_battle",
+        evidence=_evidence(game_state="home_new_battle", observation_id="runtime-1:2"),
+        strategy="farm_t19",
+        terminal_idle_timeout_request_id=hold["request_id"],
+        source="runtime-terminal-idle-timeout",
+        now=hold["expires_at"] + 1,
+    )
+    status = store.status()
+    assert workflow["intent"] == "start_battle"
+    assert workflow["strategy"] == "farm_t19"
+    assert status["mode"] == "NEXT_BATTLE"
+    assert status["strategy"] == "farm_t19"
+    assert status["terminal_idle_timeout"] is None
+
+
+def test_new_operator_control_cancels_terminal_idle_timeout(tmp_path):
+    store = ControlDirectiveStore(tmp_path / "automation_ctl.json")
+    store.set_state("RUNNING", source="test")
+    store.set_mode("HOME", source="test")
+    assert store.activate_terminal_idle_timeout(
+        evidence=_evidence(game_state="home_new_battle"),
+        strategy="farm_t19",
+        now=1_000.0,
+    )
+
+    store.set_mode("WAIT", source="operator")
+    assert store.status()["terminal_idle_timeout"] is None
+
+    store.activate_terminal_idle_timeout(
+        evidence=_evidence(game_state="home_new_battle", observation_id="runtime-1:2"),
+        strategy="farm_t19",
+        now=2_000.0,
+    )
+    store.set_state("PAUSED", source="operator")
+    assert store.status()["terminal_idle_timeout"] is None
 
 
 def _evidence(
