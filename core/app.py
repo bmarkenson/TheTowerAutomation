@@ -20522,6 +20522,89 @@ class App:
         # that bounded attempt. Never run another handler against it.
         return True
 
+    def _handle_idle_timeout(self, new_state: str) -> bool:
+        """Arm or consume bounded ordinary idle intent from fresh evidence."""
+
+        control_state = getattr(
+            self._supervisor,
+            "control_state",
+            getattr(AUTOMATION.state, "value", AUTOMATION.state),
+        )
+        if str(control_state).strip().upper() != "RUNNING":
+            return False
+        evidence = self._current_control_workflow_evidence()
+        if not isinstance(evidence, Mapping):
+            return False
+        game_state = str(evidence.get("game_state") or "").strip().lower()
+        timed_pause_request_id = getattr(
+            self._supervisor,
+            "timed_pause_expiry_pending",
+            None,
+        )
+        if isinstance(timed_pause_request_id, str) and timed_pause_request_id:
+            if game_state == "active_battle":
+                self._supervisor.consume_timed_pause_expiry(
+                    timed_pause_request_id
+                )
+                log(
+                    "[IDLE_TIMEOUT] Timed Pause expired during the active "
+                    "battle; continuing the same battle and Strategy",
+                    "INFO",
+                    console=True,
+                )
+                return False
+            if game_state in {"game_over", "tournament_results"}:
+                if AUTOMATION.mode is not ExecMode.HOME:
+                    self._supervisor.persist_mode("HOME")
+                return False
+            if game_state == "home_new_battle":
+                workflow = self._supervisor.request_idle_timeout_start(
+                    evidence=evidence,
+                    timed_pause_state_request_id=timed_pause_request_id,
+                )
+                if workflow is not None:
+                    self._observe_strategy_request()
+                    return True
+
+        hold = getattr(self._supervisor, "terminal_idle_timeout", None)
+        if (
+            AUTOMATION.mode in {ExecMode.WAIT, ExecMode.HOME}
+            and game_state
+            in {"game_over", "tournament_results", "home_new_battle"}
+        ):
+            if not isinstance(hold, Mapping):
+                activate = getattr(
+                    self._supervisor,
+                    "activate_terminal_idle_timeout",
+                    None,
+                )
+                if not callable(activate):
+                    return False
+                hold = activate(evidence)
+            if isinstance(hold, Mapping) and float(
+                hold.get("expires_at") or 0.0
+            ) <= time.time():
+                if game_state in {"game_over", "tournament_results"}:
+                    advance = getattr(
+                        self._supervisor,
+                        "advance_terminal_idle_timeout_if_expired",
+                        None,
+                    )
+                    if callable(advance):
+                        advance()
+                    return False
+                if game_state == "home_new_battle":
+                    workflow = self._supervisor.request_idle_timeout_start(
+                        evidence=evidence,
+                        terminal_timeout_request_id=str(
+                            hold.get("request_id") or ""
+                        ),
+                    )
+                    if workflow is not None:
+                        self._observe_strategy_request()
+                        return True
+        return False
+
     def _handle_primary_states(
         self,
         new_state: str,
@@ -20534,6 +20617,8 @@ class App:
         selector = getattr(self, "_run_perk_selector", None)
         if selector is not None:
             selector.observe_state(new_state)
+        if self._handle_idle_timeout(new_state):
+            return
         if self._advance_pending_game_over_route_recovery(new_state, img):
             return
         if new_state != "HOME_SCREEN":
@@ -21047,6 +21132,13 @@ class App:
             def sync_terminal_control() -> None:
                 self._supervisor.apply_control()
                 self._observe_strategy_request()
+                advance_idle_timeout = getattr(
+                    self._supervisor,
+                    "advance_terminal_idle_timeout_if_expired",
+                    None,
+                )
+                if callable(advance_idle_timeout):
+                    advance_idle_timeout()
 
             def mark_retry_started() -> None:
                 if preserved_terminal_recovery:

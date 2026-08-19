@@ -550,6 +550,7 @@ class ControlDirectiveStore:
         evidence: Mapping[str, object],
         strategy: Optional[str] = None,
         terminal_idle_timeout_request_id: Optional[str] = None,
+        timed_pause_expiry_state_request_id: Optional[str] = None,
         process_restart_handoff_id: Optional[str] = None,
         source: Optional[str] = None,
         now: Optional[float] = None,
@@ -578,13 +579,24 @@ class ControlDirectiveStore:
         normalized_terminal_timeout_id = (
             str(terminal_idle_timeout_request_id or "").strip() or None
         )
+        normalized_timed_pause_state_id = (
+            str(timed_pause_expiry_state_request_id or "").strip() or None
+        )
         if (
-            normalized_terminal_timeout_id is not None
+            (
+                normalized_terminal_timeout_id is not None
+                or normalized_timed_pause_state_id is not None
+            )
             and normalized_intent != "start_battle"
         ):
             raise ValueError(
-                "A terminal idle timeout may authorize only Start Battle"
+                "An idle timeout may authorize only Start Battle"
             )
+        if (
+            normalized_terminal_timeout_id is not None
+            and normalized_timed_pause_state_id is not None
+        ):
+            raise ValueError("Idle timeout Start authority must have one source")
         if (
             normalized_restart_handoff_id is not None
             and normalized_intent != "attach_battle"
@@ -632,6 +644,19 @@ class ControlDirectiveStore:
                 ):
                     raise ValueError(
                         "Terminal idle timeout no longer authorizes this Start"
+                    )
+            if normalized_timed_pause_state_id is not None:
+                if (
+                    str(data.get("state") or "").strip().upper()
+                    != "RUNNING"
+                    or str(data.get("state_request_id") or "").strip()
+                    != normalized_timed_pause_state_id
+                    or normalized_evidence.get("game_state")
+                    != "home_new_battle"
+                    or normalized_strategy is None
+                ):
+                    raise ValueError(
+                        "Timed Pause expiry no longer authorizes this Start"
                     )
             raw_current = data.get("battle_workflow")
             current = validate_battle_workflow(raw_current)
@@ -758,7 +783,11 @@ class ControlDirectiveStore:
                     workflow_strategy_definition_fingerprint
                 )
             data["battle_workflow"] = workflow
-            if terminal_timeout is not None:
+            data.pop("terminal_idle_timeout", None)
+            if (
+                terminal_timeout is not None
+                or normalized_timed_pause_state_id is not None
+            ):
                 data["mode"] = "NEXT_BATTLE"
                 data["mode_updated_at"] = timestamp
                 data["mode_request_id"] = uuid4().hex
@@ -2517,6 +2546,8 @@ class ControlDirectiveStore:
                 != hold["mode_request_id"]
             ):
                 return data
+            if hold["status"] == "returning_home":
+                return data
             timestamp = _timestamp_at(current_time)
             mode_request_id = uuid4().hex
             data["mode"] = "HOME"
@@ -2685,6 +2716,7 @@ class ControlDirectiveStore:
             previous = self._valid_strategy(data.get("strategy"))
             strategy_request_id = uuid4().hex
             data["strategy"] = normalized
+            data.pop("terminal_idle_timeout", None)
             data["strategy_apply_mode"] = normalized_apply_mode
             if normalized_apply_mode == "active_battle":
                 data["strategy_active_battle_identity"] = (

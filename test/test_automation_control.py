@@ -1370,6 +1370,7 @@ def test_timed_pause_expiry_persists_resume_before_changing_memory(
     saved = json.loads(control_file.read_text(encoding="utf-8"))
     assert saved["state"] == "RUNNING"
     assert "resume_at" not in saved
+    assert supervisor.timed_pause_expiry_pending == saved["state_request_id"]
 
     supervisor.apply_control()
     assert not supervisor.is_paused

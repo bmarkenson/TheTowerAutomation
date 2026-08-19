@@ -125,6 +125,10 @@ def test_terminal_idle_timeout_routes_home_then_requests_fallback_start(
     assert returning_home is not None
     assert returning_home["status"] == "returning_home"
     assert store.status()["mode"] == "HOME"
+    assert store.advance_expired_terminal_idle_timeout_to_home(
+        hold["request_id"],
+        now=hold["expires_at"] + 0.5,
+    ) == returning_home
 
     workflow = store.request_battle_workflow(
         "start_battle",
@@ -162,6 +166,86 @@ def test_new_operator_control_cancels_terminal_idle_timeout(tmp_path):
     )
     store.set_state("PAUSED", source="operator")
     assert store.status()["terminal_idle_timeout"] is None
+
+    store.set_state("RUNNING", source="operator")
+    store.set_mode("HOME", source="operator")
+    store.activate_terminal_idle_timeout(
+        evidence=_evidence(game_state="home_new_battle", observation_id="runtime-1:3"),
+        strategy="farm_t19",
+        now=3_000.0,
+    )
+    store.set_strategy("farm_t18", source="operator")
+    assert store.status()["terminal_idle_timeout"] is None
+
+
+def test_runtime_arms_terminal_idle_timeout_from_fresh_wait_boundary():
+    app = App.__new__(App)
+    app._supervisor = MagicMock()
+    app._supervisor.control_state = "RUNNING"
+    app._supervisor.timed_pause_expiry_pending = None
+    app._supervisor.terminal_idle_timeout = None
+    evidence = _evidence(game_state="game_over")
+    app._current_control_workflow_evidence = MagicMock(return_value=evidence)
+    app._supervisor.activate_terminal_idle_timeout.return_value = {
+        "request_id": "hold-1",
+        "expires_at": 2_000.0,
+    }
+    original_mode = AUTOMATION.mode
+    AUTOMATION.mode = ExecMode.WAIT
+    try:
+        with patch("core.app.time.time", return_value=1_000.0):
+            assert app._handle_idle_timeout("GAME_OVER") is False
+    finally:
+        AUTOMATION.mode = original_mode
+
+    app._supervisor.activate_terminal_idle_timeout.assert_called_once_with(
+        evidence
+    )
+
+
+def test_runtime_consumes_expired_home_hold_into_start_workflow():
+    app = App.__new__(App)
+    app._supervisor = MagicMock()
+    app._supervisor.control_state = "RUNNING"
+    app._supervisor.timed_pause_expiry_pending = None
+    app._supervisor.terminal_idle_timeout = {
+        "request_id": "hold-1",
+        "expires_at": 1_000.0,
+    }
+    evidence = _evidence(game_state="home_new_battle")
+    app._current_control_workflow_evidence = MagicMock(return_value=evidence)
+    app._supervisor.request_idle_timeout_start.return_value = {
+        "request_id": "workflow-1"
+    }
+    app._observe_strategy_request = MagicMock()
+    original_mode = AUTOMATION.mode
+    AUTOMATION.mode = ExecMode.HOME
+    try:
+        with patch("core.app.time.time", return_value=1_001.0):
+            assert app._handle_idle_timeout("HOME_SCREEN") is True
+    finally:
+        AUTOMATION.mode = original_mode
+
+    app._supervisor.request_idle_timeout_start.assert_called_once_with(
+        evidence=evidence,
+        terminal_timeout_request_id="hold-1",
+    )
+    app._observe_strategy_request.assert_called_once_with()
+
+
+def test_timed_pause_expiry_resumes_same_active_battle_without_strategy_change():
+    app = App.__new__(App)
+    app._supervisor = MagicMock()
+    app._supervisor.control_state = "RUNNING"
+    app._supervisor.timed_pause_expiry_pending = "state-2"
+    app._current_control_workflow_evidence = MagicMock(
+        return_value=_evidence(game_state="active_battle")
+    )
+
+    assert app._handle_idle_timeout("RUNNING") is False
+
+    app._supervisor.consume_timed_pause_expiry.assert_called_once_with("state-2")
+    app._supervisor.request_idle_timeout_start.assert_not_called()
 
 
 def _evidence(

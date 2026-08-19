@@ -37,12 +37,15 @@ from numpy.typing import NDArray
 from core.control_directives import (
     ControlDirectiveError,
     ControlDirectiveStore,
+    DEFAULT_IDLE_TIMEOUT_SECONDS,
+    DEFAULT_IDLE_TIMEOUT_STRATEGY,
     MAXIMUM_GAME_SPEED_TARGET,
     normalize_automation_mode,
     normalize_emulator_location,
     normalize_emulator_maintenance,
     normalize_game_speed_target,
     normalize_interactive_development_lease,
+    normalize_terminal_idle_timeout,
 )
 from core.control_model import (
     validate_battle_workflow,
@@ -190,6 +193,9 @@ class AutomationSupervisor:
             initial_directives.get("setup_capture") is not None
             and self._setup_capture is None
         )
+        self._terminal_idle_timeout = normalize_terminal_idle_timeout(
+            initial_directives.get("terminal_idle_timeout")
+        )
         self._runtime_id = uuid4().hex
         self.auto_return_secs = max(0, int(auto_return_secs))
         self.auto_return_enabled = bool(auto_return_enabled)
@@ -211,6 +217,7 @@ class AutomationSupervisor:
         self._last_applied_game_speed_target: Optional[float] = None
         self._last_game_speed_target_revision: object = None
         self._pause_resume_at: Optional[float] = None
+        self._timed_pause_expiry_pending: Optional[str] = None
         self._last_invalid_resume_at: object = None
         self._last_applied_adb_request: Optional[Tuple[int, object]] = None
         self._last_deferred_adb_request: Optional[Tuple[int, object]] = None
@@ -341,6 +348,30 @@ class AutomationSupervisor:
         """Return the latest validated explicit battle workflow directive."""
 
         return deepcopy(self._battle_workflow) if self._battle_workflow else None
+
+    @property
+    def terminal_idle_timeout(self) -> Optional[Dict[str, object]]:
+        """Return the exact terminal/Home hold currently in force."""
+
+        return (
+            deepcopy(self._terminal_idle_timeout)
+            if self._terminal_idle_timeout is not None
+            else None
+        )
+
+    @property
+    def timed_pause_expiry_pending(self) -> Optional[str]:
+        """Return the resumed State request awaiting screen disposition."""
+
+        return self._timed_pause_expiry_pending
+
+    def consume_timed_pause_expiry(self, request_id: str) -> bool:
+        """Consume only the current process-local timed-Pause expiry."""
+
+        if self._timed_pause_expiry_pending != str(request_id or "").strip():
+            return False
+        self._timed_pause_expiry_pending = None
+        return True
 
     @property
     def process_restart_handoff(self) -> Optional[Dict[str, object]]:
@@ -548,6 +579,12 @@ class AutomationSupervisor:
                 state_revision is not None
                 and state_revision != self._last_state_directive_revision
             )
+            if (
+                state_directive_changed
+                and self._timed_pause_expiry_pending is not None
+                and state_revision != self._timed_pause_expiry_pending
+            ):
+                self._timed_pause_expiry_pending = None
             requested_state = str(directives.get("state") or "").upper()
             if self._catastrophic_pause_latched and requested_state == "RUNNING":
                 if self._catastrophic_pause_state_revision is None:
@@ -665,6 +702,9 @@ class AutomationSupervisor:
             self._setup_capture_error = bool(
                 directives.get("setup_capture") is not None
                 and self._setup_capture is None
+            )
+            self._terminal_idle_timeout = normalize_terminal_idle_timeout(
+                directives.get("terminal_idle_timeout")
             )
             if self._unexpected_manual_yield_emergency and self._manual_control:
                 self._unexpected_manual_yield_emergency = False
@@ -1446,6 +1486,115 @@ class AutomationSupervisor:
             return None
         self._battle_workflow = dict(workflow) if workflow else None
         return dict(workflow) if workflow else None
+
+    def activate_terminal_idle_timeout(
+        self,
+        evidence: Mapping[str, object],
+    ) -> Optional[Dict[str, object]]:
+        """Arm the configured one-shot Wait/Home timeout."""
+
+        previous_id = str(
+            (self._terminal_idle_timeout or {}).get("request_id") or ""
+        )
+        try:
+            hold = self._control_store.activate_terminal_idle_timeout(
+                evidence=evidence,
+                timeout_seconds=DEFAULT_IDLE_TIMEOUT_SECONDS,
+                strategy=DEFAULT_IDLE_TIMEOUT_STRATEGY,
+            )
+        except (ControlDirectiveError, ValueError) as exc:
+            log(f"[IDLE_TIMEOUT] Could not arm terminal hold: {exc}", "WARN")
+            return None
+        self._terminal_idle_timeout = dict(hold) if hold else None
+        if hold is not None and hold["request_id"] != previous_id:
+            log(
+                "[IDLE_TIMEOUT] Holding the requested terminal/Home boundary "
+                f"for {DEFAULT_IDLE_TIMEOUT_SECONDS // 60} minutes; then "
+                f"starting {DEFAULT_IDLE_TIMEOUT_STRATEGY}",
+                "INFO",
+                console=True,
+            )
+        return dict(hold) if hold else None
+
+    def advance_terminal_idle_timeout_if_expired(self) -> bool:
+        """Move one expired exact terminal hold toward Home."""
+
+        hold = self._terminal_idle_timeout
+        if (
+            not isinstance(hold, Mapping)
+            or hold.get("status") == "returning_home"
+            or float(hold.get("expires_at") or 0.0) > time.time()
+        ):
+            return False
+        try:
+            advanced = (
+                self._control_store.advance_expired_terminal_idle_timeout_to_home(
+                    str(hold.get("request_id") or ""),
+                    now=time.time(),
+                )
+            )
+        except (ControlDirectiveError, ValueError) as exc:
+            log(f"[IDLE_TIMEOUT] Could not release terminal hold: {exc}", "WARN")
+            return False
+        if advanced is None or advanced.get("status") != "returning_home":
+            return False
+        self._terminal_idle_timeout = dict(advanced)
+        self._last_applied_mode = None
+        self.apply_control()
+        log(
+            "[IDLE_TIMEOUT] Terminal hold expired; returning Home before "
+            f"starting {advanced.get('strategy')}",
+            "INFO",
+            console=True,
+        )
+        return True
+
+    def request_idle_timeout_start(
+        self,
+        *,
+        evidence: Mapping[str, object],
+        terminal_timeout_request_id: Optional[str] = None,
+        timed_pause_state_request_id: Optional[str] = None,
+    ) -> Optional[Dict[str, object]]:
+        """Consume one timeout into the ordinary exact-evidence Start workflow."""
+
+        hold = self._terminal_idle_timeout
+        strategy = (
+            str(hold.get("strategy") or "").strip().lower()
+            if isinstance(hold, Mapping)
+            and terminal_timeout_request_id is not None
+            else DEFAULT_IDLE_TIMEOUT_STRATEGY
+        )
+        try:
+            workflow = self._control_store.request_battle_workflow(
+                "start_battle",
+                evidence=evidence,
+                strategy=strategy,
+                terminal_idle_timeout_request_id=terminal_timeout_request_id,
+                timed_pause_expiry_state_request_id=(
+                    timed_pause_state_request_id
+                ),
+                source="runtime-idle-timeout",
+            )
+        except (ControlDirectiveError, ValueError) as exc:
+            log(f"[IDLE_TIMEOUT] Could not request fallback battle: {exc}", "WARN")
+            return None
+        self._terminal_idle_timeout = None
+        if timed_pause_state_request_id is not None:
+            self.consume_timed_pause_expiry(timed_pause_state_request_id)
+        self._last_applied_mode = None
+        self.apply_control()
+        self._battle_workflow = dict(workflow)
+        log_action_intent(
+            f"Starting timeout fallback Strategy {strategy}",
+            reason="the bounded idle hold expired without newer operator intent",
+            detail=(
+                "[IDLE_TIMEOUT] result=requested "
+                f"strategy={strategy} workflow={workflow.get('request_id')}"
+            ),
+            operation_id=str(workflow.get("request_id") or ""),
+        )
+        return dict(workflow)
 
     def request_process_restart_reattachment(
         self,
@@ -2373,6 +2522,7 @@ class AutomationSupervisor:
         self._last_state_directive_revision = request_id
         self._apply_state("RUNNING", request_id=request_id)
         self._pause_resume_at = None
+        self._timed_pause_expiry_pending = str(request_id or "").strip() or None
         log(
             "[CTRL] Timed pause expired; persisted State=RUNNING",
             "INFO",
