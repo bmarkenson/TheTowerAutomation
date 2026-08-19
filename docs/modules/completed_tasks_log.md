@@ -39,6 +39,24 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-19 Expected same-battle emulator-handoff wave rollback
+
+- Exact implementation candidate `42aebe7` accepts a lower destination
+  `currentWave` after an emulator-PC move when forced serialization proves the
+  same canonical active-round identity, the exact destination target, mapped
+  progress availability, and a non-regressing save revision. Different battle,
+  target, unavailable evidence, and revision rollback remain catastrophic.
+- Startup consumes the one retained legacy wave-only failure only when its
+  ordered receipt already proves every stronger check passed. This repairs the
+  observed same-battle move without weakening another blocked handoff.
+- The 342 focused handoff, control, process, target-session, host-performance,
+  recovery, watchdog, failure-policy, and documentation tests passed. The
+  exact runtime candidate then passed compilation, state definitions, clickmap
+  integrity with zero errors and the established 44 orphan notices, and all
+  3,056 repository tests in 631.30 seconds using development-environment
+  fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+
 ### 2026-08-18 Active emulator-handoff save rollback guard
 
 - Exact implementation candidate `2e20c96` retains monotonic active-battle
