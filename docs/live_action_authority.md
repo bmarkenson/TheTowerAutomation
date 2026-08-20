@@ -12,8 +12,14 @@ fails closed.
 - Use fresh source-state evidence immediately before every tap. A transition
   frame, stale screenshot, incomplete capture, old handoff, or target/owner
   mismatch grants no authority.
-- Pause blocks every strategy, handler, recovery, and terminal action. Manual
-  activity or unexpected navigation requires yielding, not racing the player.
+- Pause blocks every ordinary strategy, handler, recovery, terminal-UI, and
+  navigation action. Capture, detection, save analysis, and record persistence
+  may continue. The only input exception is a durable per-Pause claim for one
+  paired Android Home/launcher restoration at a freshly proven Game Over or
+  Tournament Results boundary when the initial stable save still reports an
+  active round. That transaction never runs during battle, opens no terminal
+  panel, dismisses nothing, and is absent under a strict Pause. Manual activity
+  or unexpected navigation still requires yielding, not racing the player.
 - Exit Battle → Go Home is allowed only when the task authorizes it and the
   active run remains resumable. A safe in-battle setting transition does not
   imply Home, Surrender, restart, or cleanup authority.
@@ -41,8 +47,10 @@ performs no Retry, Home, or Surrender input.
 
 Fresh owned-start and natural-terminal evidence is retained before activity
 continuity or a fallible receipt write can consume its only observation frame.
-Pause denies every write and input while preserving that exact proof for
-Resume. A transient claimed-start or confirmed-launch result-write failure is
+Pause denies every owned-test action while preserving that exact proof for
+Resume; passive evidence and result writes, plus the separately claimed
+terminal-save refresh above, grant no cleanup authority. A transient
+claimed-start or confirmed-launch result-write failure is
 retried as receipt-only work; it never grants continuity, a second launch, or
 Surrender against a later screen. Confirmed-launch prompts and manual-start
 observation remain bound to the ADB target on which validation completed.

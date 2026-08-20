@@ -566,6 +566,7 @@ public sealed class ControlSurfaceCompatibilityTests
                 "host_performance_telemetry_v1",
                 "managed_custom_module_presets_v1",
                 "observed_game_speed",
+                "paused_terminal_save_refresh_v1",
                 "runtime_control_acknowledgements_v1",
                 "selected_strategy_process_start",
                 "save_backed_setup_capture_v2",

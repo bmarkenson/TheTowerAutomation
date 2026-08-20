@@ -273,9 +273,11 @@ The terminal bundle is reused for configuration/report projections; the
 successor's first stable `RUNNING` boundary forces a new save and binds its own
 active-round identity.
 
-Pause still blocks every input and suspends unconsumed carry so later checks
-need fresh save or UI evidence, but it does not quarantine the underlying
-snapshot. Stop/process restart, attachment or competing workflow, manual or
+Pause still blocks every carry/transition input and suspends unconsumed carry
+so later checks need fresh save or UI evidence, but it does not quarantine the
+underlying snapshot. The terminal-only serialization claim described below
+cannot consume or bind carry. Stop/process restart, attachment or competing
+workflow, manual or
 ambiguous launch, target/context/configuration change, a wrong transition, or
 a later unrelated battle discards that transition's carry. A changed
 requirement routes only that check to UI; unsupported or incomplete evidence
@@ -350,7 +352,7 @@ independent projections:
 | --- | --- | --- | --- |
 | Home `NEW_BATTLE` before Start/Return | Perform one guarded `forced_serialization`, even when the configuration requirement set is empty; a report handoff may also be consumed from the same boundary. | The inactive runtime projection authorizes clearing retained battle identity; the same bundle supplies configuration, report, and Cell Balance projections. | An inactive proof is mandatory before Start. A safely restored transient failure is bounded and retryable; restoration, ownership, target, context, or control ambiguity blocks later input. |
 | First stable `RUNNING` after Start, Retry, Enable, or Attach | Perform one guarded `forced_serialization` and compare its exact `ActiveRoundIdentity` with the durable battle-identity record. Home Resume is a two-proof route: force once before the Resume tap to identify its target, then rearm and force again on the first stable `RUNNING` frame before adoption. | `SAME_BATTLE` restores eligible identity-bound state; `LATER_BATTLE` discards old battle-local state and adopts the successor; the bundle also supplies actual-loadout, Perk-prefix, metric, Cell Balance, audit, and report projections. | There is no History/UI substitute for battle identity. A safely restored transient failure is bounded and retryable; an active source without identity remains input-blocked. Restoration, owner, target, control, or uncertain-input ambiguity is catastrophic and may Pause. |
-| `GAME_OVER` or `TOURNAMENT_RESULTS` | One lifecycle-bound `natural_boundary` bundle. A process-restart Game Over may propose the retained identity only when the Stop handoff, target generation, and durable full-tier counter baseline agree; the newly acquired inactive save must then prove exact vector equality and non-regressing revision. For a legacy record with no vector, an explicit operator receipt may instead name the retained identity only while exact Pause, fresh Game Over, runtime/PID/target generation, Stop handoff, activity scope, selected Strategy, and its completed preflight fingerprint all agree. | Profile progression, structural terminal transition, semantic completed report, Perk-window closure, Cell Balance, optional audit projection, and Tournament conditions. Recovered continuity also unlocks only exact-battle/configuration-bound evidence: an immutable Strategy/report snapshot, a matching completed session-preflight receipt, and the versioned survival-activation checkpoint. The preflight receipt is independently eligible even when an older record lacks the Strategy snapshot; in that case it does not supply run configuration. The operator route reuses a matching independent snapshot or explicitly labels its one-time Strategy backfill. Activation restoration is observed-events-through-checkpoint evidence, not a complete terminal history. | Projection or acquisition failure remains nonblocking and preserves the applicable Game Stats, Perks, or More Stats UI fallback. Missing generic vector or component evidence, any counter change, shape drift, target/runtime change, revision regression, or component identity/configuration mismatch fails closed locally. The operator receipt is audited, report-only, and cannot grant lifecycle input or active-battle adoption. Current-process-only Perk, metric, wave, coin, speed, and transient tracker state remains omitted. |
+| `GAME_OVER` or `TOURNAMENT_RESULTS` | Start with one lifecycle-bound `natural_boundary` bundle. While Paused, if that complete stable snapshot still reports `round_active=true`, the durable Pause policy may claim one paired Android Home/launcher-restore `forced_serialization` for that exact terminal boundary; strict Pause disables it, and no terminal UI action inherits the claim. A process-restart Game Over may propose the retained identity only when the Stop handoff, target generation, and durable full-tier counter baseline agree; the newly acquired inactive save must then prove exact vector equality and non-regressing revision. For a legacy record with no vector, an explicit operator receipt may instead name the retained identity only while exact Pause, fresh Game Over, runtime/PID/target generation, Stop handoff, activity scope, selected Strategy, and its completed preflight fingerprint all agree. | Profile progression, structural terminal transition, semantic completed report, Perk-window closure, Cell Balance, optional audit projection, and Tournament conditions. Paused Tournament capture persists a valid summary even when details are unavailable, then enriches that same record from a later bound save or guarded UI opportunity. Recovered continuity also unlocks only exact-battle/configuration-bound evidence: an immutable Strategy/report snapshot, a matching completed session-preflight receipt, and the versioned survival-activation checkpoint. The preflight receipt is independently eligible even when an older record lacks the Strategy snapshot; in that case it does not supply run configuration. The operator route reuses a matching independent snapshot or explicitly labels its one-time Strategy backfill. Activation restoration is observed-events-through-checkpoint evidence, not a complete terminal history. | Projection or acquisition failure remains nonblocking and preserves the applicable Game Stats, Perks, or More Stats UI fallback. Pause retains the terminal and defers every UI fallback; Resume may enrich the same record before routing. Missing generic vector or component evidence, any counter change, shape drift, target/runtime change, revision regression, or component identity/configuration mismatch fails closed locally. The operator receipt is audited, report-only, and cannot grant lifecycle input or active-battle adoption. Current-process-only Perk, metric, wave, coin, speed, and transient tracker state remains omitted. |
 | Periodic passive observation | Every 300 seconds, the scheduler attempts one `passive_stable_read` against the current exact process/target/battle binding. The cadence is independent of forced serialization and prompt checkpoints. | Perks, active-run metrics, Cell Balance, and optional audit receipts consume any newly serialized positive evidence; an unchanged save may still establish a later flat Cell checkpoint. | An absent binding skips the read. Never treat the timer or a stable pull as proof that the game wrote recently, background the game, claim freshness/absence, or authorize input. |
 | Perk selection or exhaustion checkpoint | The stable Perk top-bar observer may request one coalesced `passive_stable_read` without changing the periodic deadline. It does not force the game to serialize. | The Perk monitor benefits from lower observation latency; active-run metrics, Cell Balance, and optional audit receipts consume the same read-only bundle without requesting another read. | Drop or record the observation; never background the game, claim freshness/absence, or authorize input. |
 
@@ -725,11 +727,21 @@ runtime/history claim remains gated by the versioned audit matrix in
 
 ##### Implemented terminal save attachment
 
-At a normal or Tournament terminal, `App` performs one fail-open stable read
-from the exact target generation already owned by its `AdbTargetSession`. It
-does not background the game or send input. The same decoded snapshot supplies
-profile progression, Tournament conditions when available, and the candidate
-completed report; no terminal consumer performs a second save read.
+At a normal or Tournament terminal, `App` first performs one fail-open stable
+read from the exact target generation already owned by its `AdbTargetSession`.
+Normally it does not background the game or send input. While Paused, the one
+narrow exception applies only when that complete stable read still reports an
+active round: the current Pause request must allow refresh, the runtime
+atomically claims the exact terminal/battle/target boundary in the control
+file, and `GuardedPlayerSaveSerializer` performs one Android Home/restore pair.
+The claim survives process restart and cannot be replayed for the same Pause
+boundary. Strict Pause, an active-battle screen, an active catastrophic safety
+hold, changed Pause request, runtime/PID/target change, another exclusive
+owner, or source-restoration ambiguity blocks it. A fresh terminal frame and a
+second natural-boundary read are required after restoration. The same decoded
+snapshot supplies profile
+progression, Tournament conditions when available, and the candidate completed
+report; no terminal consumer independently requests another save read.
 
 The report is accepted only for a current-process `bound` terminal whose
 canonical active-round identity matches the retained run binding, whose
@@ -784,7 +796,9 @@ independent acquisition, timer, or scheduler. A slow or failed projection
 cannot delay the App heartbeat. The auditor never pauses or backgrounds the
 game, navigates, taps, dispatches a handler, changes a lifecycle decision, or
 suppresses UI. A target-generation change discards the supplied result.
-Capture and detection continue to feed it while global Pause blocks actions.
+Capture and detection continue to feed it while global Pause blocks ordinary
+actions. The independently owned paused-terminal serializer does not grant the
+auditor acquisition or input authority.
 
 Compatibility is granted by the decoder, not by matching the manifest's game
 version literally. The decoder must resolve a supported, shape-valid exact or
@@ -1399,10 +1413,13 @@ for continued battle retry.
   Initialization completion depends on the strategy assertion, not merely the
   current primary screen.
 - While paused or exclusively gated, capture, detection, lifecycle observation,
-  and read-only status reporting continue. Strategy, handler, mission,
-  recovery, and blind-tapper actions remain blocked. The exact validation
-  terminal claim above is the narrow exception: detection continues, but
-  successor lifecycle observation waits until the old boundary finalizes.
+  save analysis, record persistence, and read-only status reporting continue.
+  Strategy, mission, recovery, terminal UI, and blind-tapper actions remain
+  blocked. Paused terminal observation may invoke only the observation-only
+  Game Over/Tournament handler path and the separately claimed save-refresh
+  pair described above; it never opens Perks/More Stats, dismisses results, or
+  follows Home/Retry. The exact validation terminal claim remains separate:
+  successor lifecycle observation waits until that old boundary finalizes.
 - A compound Strategy route binds its selected typed action guard for the
   entire synchronous route without holding the mutation lock. Each nested tap
   or swipe opens its own short dispatch transaction and rechecks global
@@ -1556,6 +1573,12 @@ only from a freshly detected Home frame. A requested or acknowledged battle
 workflow, Take/Return Control, Setup Capture, interactive development, or any
 second exclusive owner removes that exception. It cannot authorize Battle,
 Resume Battle, configuration, recovery, or another collector.
+
+The paused terminal-save refresh is not a general lifecycle-action allowance
+in this matrix. It is a separate one-transaction capability whose durable
+claim, terminal class, Pause request ID, runtime/PID, target generation, source
+restoration, and final mutation guard must all agree. Its only mutations are
+the paired Android Home and launcher restore needed to serialize the save.
 
 `external_development` is the one intentionally suppressive hold. Unlike
 initialization, preflight, battle-identity, and exclusive-validation ownership, it
@@ -1823,8 +1846,13 @@ warning text in `actions.log`.
   acquired and is rewritten to `released` with no PID on a clean release. A
   crash can leave `held` metadata after the OS lock disappears, so metadata
   alone is not proof that its PID is still alive.
-- Pause blocks every strategy and handler action while allowing observation and
-  status reporting.
+- Pause blocks every ordinary strategy and handler action while allowing
+  capture, detection, save analysis, record persistence, and status reporting.
+  Each Pause request stores an `allowed` terminal-save-refresh choice plus its
+  consumed boundary claims. The default is allowed; a strict Pause stores
+  `allowed=false`. Internal re-Pause and process restart preserve the current
+  request's choice and claims, while Enable or a new Pause creates a new
+  episode. The claim authorizes only the terminal serializer described above.
 - One schema-1 `interactive_development_lease` directive may bind a bounded
   owner label and ordinary lease ID to the fresh production runtime/session,
   PID, exact ADB target, and starting screen/battle evidence. The request is

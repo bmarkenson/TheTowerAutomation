@@ -482,6 +482,74 @@ def test_pause_persisted_during_prechecks_blocks_first_lifecycle_input():
     assert background == []
 
 
+def test_paused_serializer_requires_explicit_terminal_refresh_authority():
+    original_state = AUTOMATION.state
+    ordinary_inputs = []
+    terminal_inputs = []
+    token = AUTOMATION.install_mutation_guard(lambda: True)
+    AUTOMATION.state = RunState.PAUSED
+    try:
+        ordinary = GuardedPlayerSaveSerializer(
+            acquirer=_acquirer(),
+            context_guard_fn=lambda: True,
+            action_guard_fn=lambda: True,
+            source_guard_fn=lambda _frame, _stable: True,
+            background_fn=lambda target: ordinary_inputs.append(
+                ("background", target)
+            )
+            or True,
+            foreground_fn=lambda target: ordinary_inputs.append(
+                ("foreground", target)
+            )
+            or True,
+            sleep_fn=lambda _seconds: None,
+            input_log_fn=lambda *_args, **_kwargs: None,
+            debug_log_fn=lambda *_args, **_kwargs: None,
+        ).acquire(
+            expected_target="private-target",
+            expected_generation=3,
+            target_generation_detail="private-generation",
+            source_label="Game Over",
+            initial_frame=object(),
+        )
+        terminal = GuardedPlayerSaveSerializer(
+            acquirer=_acquirer(),
+            context_guard_fn=lambda: True,
+            action_guard_fn=lambda: True,
+            source_guard_fn=lambda _frame, _stable: True,
+            background_fn=lambda target: terminal_inputs.append(
+                ("background", target)
+            )
+            or True,
+            foreground_fn=lambda target: terminal_inputs.append(
+                ("foreground", target)
+            )
+            or True,
+            sleep_fn=lambda _seconds: None,
+            input_log_fn=lambda *_args, **_kwargs: None,
+            debug_log_fn=lambda *_args, **_kwargs: None,
+            allow_paused_terminal_save_refresh=True,
+        ).acquire(
+            expected_target="private-target",
+            expected_generation=3,
+            target_generation_detail="private-generation",
+            source_label="Game Over",
+            initial_frame=object(),
+        )
+    finally:
+        AUTOMATION.clear_mutation_guard(token)
+        AUTOMATION.state = original_state
+
+    assert ordinary.status is GuardedSerializationStatus.BLOCKED
+    assert ordinary.lifecycle_input_attempted is False
+    assert ordinary_inputs == []
+    assert terminal.complete
+    assert terminal_inputs == [
+        ("background", "private-target"),
+        ("foreground", "private-target"),
+    ]
+
+
 def test_pause_waits_for_required_foreground_restoration():
     original_state = AUTOMATION.state
     foreground_started = threading.Event()

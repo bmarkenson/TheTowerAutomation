@@ -107,7 +107,7 @@ DEFAULT_STALE_AFTER_SECONDS = 180
 EMULATOR_DEGRADATION_CACHE_SECONDS = 60.0
 # Advance this when a newer Windows client must reload the resident service,
 # and advance that client's MinimumServerRevision in the same change.
-CONTROL_SURFACE_REVISION = 51
+CONTROL_SURFACE_REVISION = 52
 CONTROL_SURFACE_CAPABILITIES = (
     "active_battle_screen_metrics_v1",
     "active_battle_strategy_adoption",
@@ -137,6 +137,7 @@ CONTROL_SURFACE_CAPABILITIES = (
     "managed_custom_module_presets_v1",
     "observed_game_speed",
     "persistent_adb_connection_v1",
+    "paused_terminal_save_refresh_v1",
     "runtime_control_acknowledgements_v1",
     "save_backed_setup_capture_v1",
     "save_backed_setup_capture_v2",
@@ -1399,6 +1400,8 @@ class ControlSurfaceService:
                 "adb_port": None,
                 "resume_at": None,
                 "remaining_seconds": None,
+                "pause_terminal_save_refresh": None,
+                "pause_terminal_save_refresh_error": None,
                 "updated_at": None,
                 "state_updated_at": None,
                 "state_request_id": None,
@@ -3220,14 +3223,31 @@ class ControlSurfaceService:
                         raise ControlSurfaceRequestError(
                             "manual_surrender_collection must be minimal or full"
                         )
+                    allow_terminal_save_refresh = request.get(
+                        "allow_terminal_save_refresh",
+                        True,
+                    )
+                    if type(allow_terminal_save_refresh) is not bool:
+                        raise ControlSurfaceRequestError(
+                            "allow_terminal_save_refresh must be a boolean"
+                        )
                     manual_control = self.control_store.request_manual_control(
                         evidence=current["control_model"]["workflow_evidence"],
                         surrender_collection=surrender_collection,
+                        allow_terminal_save_refresh=(
+                            allow_terminal_save_refresh
+                        ),
                         source="control-surface",
                     )
                     audit = (
                         "Requested Take Manual Control with an indefinite Pause; "
-                        f"manual Surrender collection={surrender_collection}"
+                        f"manual Surrender collection={surrender_collection}; "
+                        "terminal save refresh "
+                        + (
+                            "allowed"
+                            if allow_terminal_save_refresh
+                            else "disabled for this Pause"
+                        )
                     )
             elif action == "return_control":
                 current = self.status()
@@ -3262,6 +3282,14 @@ class ControlSurfaceService:
                         code="process_stopped",
                     )
                 minutes = request.get("minutes")
+                allow_terminal_save_refresh = request.get(
+                    "allow_terminal_save_refresh",
+                    True,
+                )
+                if type(allow_terminal_save_refresh) is not bool:
+                    raise ControlSurfaceRequestError(
+                        "allow_terminal_save_refresh must be a boolean"
+                    )
                 resume_at = None
                 description = "indefinitely"
                 if minutes is not None:
@@ -3287,6 +3315,9 @@ class ControlSurfaceService:
                 try:
                     saved = self.control_store.set_paused_unless_stopped(
                         resume_at=resume_at,
+                        allow_terminal_save_refresh=(
+                            allow_terminal_save_refresh
+                        ),
                         source="control-surface",
                     )
                 except ControlDirectiveError as exc:
@@ -3297,7 +3328,14 @@ class ControlSurfaceService:
                     disposition = "no_op"
                     audit = "Automation is already STOPPED; Pause did not override Stop"
                 else:
-                    audit = f"Requested PAUSED {description}"
+                    audit = (
+                        f"Requested PAUSED {description}; terminal save "
+                        + (
+                            "refresh allowed"
+                            if allow_terminal_save_refresh
+                            else "refresh disabled for this Pause"
+                        )
+                    )
             elif action == "enable":
                 current = self.status()
                 effective_authority = str(
@@ -4361,8 +4399,7 @@ class ControlSurfaceService:
                 ).get("observation_id")
                 or ""
             )
-            self.control_store.set_state(
-                "PAUSED",
+            self.control_store.set_paused_unless_stopped(
                 source="control-surface-attached-restart",
             )
             self._wait_for_attached_restart_pause(
@@ -4418,8 +4455,7 @@ class ControlSurfaceService:
             restored_state = original_state
             if original_state == "PAUSED" and original_resume_at is not None:
                 if float(original_resume_at) > time.time():
-                    self.control_store.set_state(
-                        "PAUSED",
+                    self.control_store.set_paused_unless_stopped(
                         resume_at=float(original_resume_at),
                         source="control-surface-attached-restart",
                     )
@@ -4446,8 +4482,7 @@ class ControlSurfaceService:
             }
         except (AutomationProcessError, ControlDirectiveError, ValueError) as exc:
             try:
-                self.control_store.set_state(
-                    "PAUSED",
+                self.control_store.set_paused_unless_stopped(
                     source="control-surface-attached-restart-failure",
                 )
             except (ControlDirectiveError, ValueError):
@@ -6579,8 +6614,9 @@ class ControlSurfaceService:
         else:
             pause_code = "available"
             pause_reason = (
-                "request zero automated device input; Pause remains available "
-                "during every workflow"
+                "block game interaction except the selected one-shot terminal "
+                "save-refresh policy; Pause remains available during every "
+                "workflow"
             )
 
         manage_active_battle_available = bool(
@@ -6835,6 +6871,14 @@ class ControlSurfaceService:
                 "acknowledged": state_ack_current,
                 "effective": effective_authority,
                 "observation_continues_while_paused": True,
+                "paused_terminal_save_refresh": (
+                    dict(control["pause_terminal_save_refresh"])
+                    if isinstance(
+                        control.get("pause_terminal_save_refresh"),
+                        Mapping,
+                    )
+                    else None
+                ),
                 "catastrophic_hold": bool(
                     runtime_catastrophic_pause_hold.get("active") is True
                 ),
@@ -6843,8 +6887,10 @@ class ControlSurfaceService:
                     or None
                 ),
                 "meaning": (
-                    "Paused means zero automated device input; observation may continue. "
-                    "Enabled permits guarded actions and does not assert that the game is RUNNING."
+                    "Paused keeps observation active and blocks ordinary game input; "
+                    "the current Pause may separately allow one guarded save refresh "
+                    "at a proven terminal boundary. Enabled permits guarded actions "
+                    "and does not assert that the game is RUNNING."
                 ),
             },
             "observation": observation,

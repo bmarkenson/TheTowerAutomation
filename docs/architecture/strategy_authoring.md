@@ -353,11 +353,15 @@ completes validation degraded and keeps the battle running.
 classes: observation, auxiliary collection, strategy action, and lifecycle
 action. Observation continues under every state. Normal strategy, handler,
 collector, and lifecycle policy remains eligible after a recoverable validation
-result. Global Pause blocks input only when it is explicit operator intent or
+result. Global Pause blocks ordinary typed input only when it is explicit
+operator intent or
 the runtime reports a catastrophic loss of control authority, exact-target
 ownership, source restoration after lifecycle input, or dispatched-input
 certainty. Exclusive screen owners remain valid only while their currently
 bounded action is in progress; a recoverable result must release them.
+The separately claimed terminal-save Home/restore pair is not Strategy,
+collector, repair, or lifecycle-route authority and cannot mutate authored
+configuration.
 
 Structured Strategy Action Gate state remains available for compatibility with
 older runtimes and clients. Current configuration, validation, evidence,

@@ -39,6 +39,36 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-20 Paused terminal observation and guarded save refresh
+
+- Exact implementation candidate `0a5365f` keeps capture, detection,
+  save-backed analysis, and structured battle-record persistence active while
+  automation is Paused. Game Over retains one partial record and battle ID for
+  later enrichment after Resume; Tournament Results persists a valid summary
+  without requiring More Stats and enriches that same record when details
+  become available.
+- Each Pause now stores a durable terminal-save-refresh policy. The default
+  permits one claimed Android Home/launcher-restore serialization only after a
+  complete stable natural save at a freshly proven Game Over or Tournament
+  Results boundary still reports an active round. The claim survives a process
+  restart, never grants terminal-screen input, and is blocked by changed
+  Pause, target, process, generation, boundary, or catastrophic-hold evidence.
+  A strict per-Pause choice disables even that lifecycle input.
+- The browser, CLI, API, and native Windows client expose the same choice and
+  status. The combined client/server compatibility revision is 51 with
+  `paused_terminal_save_refresh_v1`; ordinary Pause semantics still block all
+  strategy and handler interaction with the game.
+- After merging current production, 497 overlap-sensitive Python tests and all
+  226 portable Control Surface tests passed. Python compilation, browser
+  JavaScript syntax, and the Release WindowsDesktop cross-build also passed;
+  the build emitted only the established read-only NuGet vulnerability-cache
+  `NU1900` warnings. The runtime-input complete checkpoint for exact candidate
+  `0a5365f` passed compilation, state-definition validation, clickmap integrity
+  with zero errors and the established 44 orphan notices, and all 3,101 tests
+  in 658.24 seconds. Validation used development-environment fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`;
+  no live process or device interaction was used for candidate validation.
+
 ### 2026-08-20 Reviewed Tournament Orb Distance mapping and preset
 
 - Exact implementation candidate `f8a4b5d` accepts the paired version-1101

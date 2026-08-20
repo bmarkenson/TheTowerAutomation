@@ -400,14 +400,22 @@
                             Click="Control_Click" />
                     <Expander Grid.Column="2"
                               Header="Timed pause…"
-                              ToolTip="Pause automated device input for a bounded duration while observation continues."
+                              ToolTip="Pause ordinary game interaction while observation continues."
                               VerticalAlignment="Top"
-                              Width="176"
+                              Width="226"
                               Margin="4">
-                      <UniformGrid Columns="2">
-                        <Button x:Name="Pause15Button" Content="15 min" Tag="pause:15" Click="Control_Click" />
-                        <Button x:Name="Pause30Button" Content="Indefinite" Tag="pause" Click="Control_Click" />
-                      </UniformGrid>
+                      <StackPanel>
+                        <UniformGrid Columns="2">
+                          <Button x:Name="Pause15Button" Content="15 min" Tag="pause:15" Click="Control_Click" />
+                          <Button x:Name="Pause30Button" Content="Indefinite" Tag="pause" Click="Control_Click" />
+                        </UniformGrid>
+                        <CheckBox x:Name="AllowTerminalSaveRefreshCheckBox"
+                                  IsChecked="True"
+                                  Content="Allow terminal save refresh"
+                                  ToolTip="If a proven Game Over or Tournament Results observation still has a stale active save, allow one guarded background-and-restore refresh. Never runs during battle."
+                                  FontSize="10"
+                                  Margin="6,5,4,3" />
+                      </StackPanel>
                     </Expander>
                   </Grid>
                   <TextBlock x:Name="ControlSelectionText"

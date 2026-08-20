@@ -65,8 +65,14 @@ changes this model.
   Exceptional owned-test and runtime-repair authority exists only under
   [`docs/live_action_authority.md`](docs/live_action_authority.md); ambiguity
   fails closed.
-- Pause blocks every strategy and handler action while capture and detection
-  may continue. Before an agent changes a live `RUNNING` runtime to `PAUSED`
+- Pause blocks every ordinary strategy, handler, recovery, and game-navigation
+  action while capture, detection, save analysis, and record persistence may
+  continue. One durable per-Pause policy may additionally authorize one paired
+  Android Home/launcher-restore save serialization at each freshly proven
+  `GAME_OVER` or `TOURNAMENT_RESULTS` boundary, and only when the initial
+  stable terminal save still reports an active round. It never applies during
+  a battle, never authorizes terminal UI input, and a strict Pause disables it.
+  Before an agent changes a live `RUNNING` runtime to `PAUSED`
   or `STOPPED` for its work, retain the prior control request and owner. That
   work is not complete until the replacement/current runtime is restored to
   `RUNNING` after fresh evidence proves the control boundary is still

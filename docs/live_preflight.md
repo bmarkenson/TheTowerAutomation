@@ -82,7 +82,9 @@ use a fresh project-validated frame before input.
 
 Before input, establish the same live owner, exact target, current control and
 acknowledgement, complete current screen, recent action history, and the
-operation's specific authority. Pause blocks actions. Manual activity,
+operation's specific authority. Pause blocks ordinary planned actions; the
+runtime's separately claimed terminal-save refresh grants no agent workflow or
+navigation authority. Manual activity,
 unexpected navigation, owner/target mismatch, a natural Game Over, or any
 ambiguous transition stops the planned input; preserve the boundary and
 reassess instead of racing or manufacturing a test state.

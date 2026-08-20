@@ -547,7 +547,7 @@ class RuntimeActionAuthority:
             return ActionAuthorityDecision(
                 action_class,
                 False,
-                "global Pause blocks every handler and input action",
+                "global Pause blocks every handler and ordinary input action",
                 owner=owner,
             )
         return None

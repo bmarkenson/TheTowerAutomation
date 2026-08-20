@@ -413,8 +413,15 @@ wrong-runtime gate evidence is not displayed as an active gate. This structured
 presentation requires Linux revision 22 and `strategy_action_gate_v1`.
 
 The Automation Control panel uses selection highlights for requested and
-acknowledged authority. The primary **Pause 30 min** action means zero automated device input
-while observation may continue. **Automation Enabled** permits guarded actions;
+acknowledged authority. The primary **Pause 30 min** action blocks ordinary
+automated game interaction while observation, save analysis, and structured
+record capture continue. **Allow terminal save refresh** is selected by
+default: only at a proven Game Over or Tournament Results boundary, and only
+when the first stable save still says the round is active, Linux may perform
+one guarded Android Home/launcher-restore serialization for that boundary.
+Clear it for a strict Pause with no lifecycle input. Neither choice opens
+terminal detail controls, dismisses the result, follows Home/Retry, or applies
+during battle. **Automation Enabled** permits guarded actions;
 it does not claim the game is Running. **When this battle ends** separately
 selects Continue automatically, Wait 30 min, or Home 30 min; the bounded
 choices hold the reached boundary and then start Farm T19 Ad Assist unless a
@@ -1167,7 +1174,7 @@ supported capabilities. The Windows build carries an expected API version, a
 minimum server revision, and required capabilities. Any mismatch produces a
 prominent full-width **Linux API update required** banner, disables dependent
 actions, and gives disabled Start buttons the same blocker in a tooltip. The
-current Windows build requires revision 51, `bounded_idle_timeout_v1`,
+current Windows build requires revision 52, `bounded_idle_timeout_v1`,
 `active_battle_screen_metrics_v1`, `active_run_metrics_v1`,
 `cell_balance_tracking_v1`,
 `current_battle_perks_v1`, `better_control_model_v2`,
@@ -1185,6 +1192,7 @@ current Windows build requires revision 51, `bounded_idle_timeout_v1`,
 `bluestacks_listener_lifetime_telemetry_v1`,
 `bluestacks_maintenance_policy_v1`,
 `managed_custom_module_presets_v1`,
+`paused_terminal_save_refresh_v1`,
 `strategy_authoring_local_loadout_editors_v1`,
 `strategy_authoring_preset_local_copy_v1`, and
 `strategy_revision_history_v1` while retaining all earlier required

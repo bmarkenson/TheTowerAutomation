@@ -27,6 +27,7 @@ from core.gc_preflight_navigation import (
     GcPreflightNavigationStatus,
 )
 from core.player_save_history import PlayerSaveAttachmentContext
+from core.player_save_serialization import GuardedSerializationStatus
 from core.run_state import AUTOMATION, ExecMode
 from core.strategy_authoring import tournament_source_to_strategy_source
 from core.strategy_profiles import StrategyProfileStore
@@ -1573,6 +1574,337 @@ def test_tournament_results_are_recorded_once_without_changing_policy(
             ),
             operation_id=operation_id,
         )
+
+
+def test_paused_tournament_observation_captures_without_terminal_ui_input():
+    app = App.__new__(App)
+    app._supervisor = SimpleNamespace(is_paused=True)
+    app._handler_enabled = lambda name: name == "game_over"
+    app._mission_mgr = MagicMock()
+    app._mission_mgr.strategy = get_strategy("tournament")
+    app._status_reporter = MagicMock()
+    app._apply_pending_strategy = MagicMock()
+    app._strategy_boundary_confirmed = False
+    app._tournament_results_captured = False
+    app._tournament_result_details_complete = False
+    app._paused_terminal_observations = {}
+    app._no_strategy_observation_active = False
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    degradation = {
+        "schema_version": 1,
+        "sources": ["attachment_observation"],
+        "failed_checks": ["damage_slider"],
+    }
+    evidence = {
+        "game_state": "tournament_results",
+        "runtime_id": "runtime-1",
+        "pid": 123,
+        "adb_target": "localhost:5555",
+        "target_generation": 4,
+        "active_round_identity_fingerprint": "a" * 64,
+    }
+    app._current_control_workflow_evidence = lambda: evidence
+    app._paused_terminal_battle_bundle = MagicMock(
+        return_value=(
+            {
+                "terminal_save_report": {"status": "unavailable"},
+                "running_configuration_degradation": degradation,
+            },
+            None,
+            None,
+            frame,
+            "disabled",
+        )
+    )
+    partial = {
+        "tournament_id": "TournamentPaused",
+        "detailed_stats": {"quality": {"valid": False}},
+    }
+
+    with (
+        patch(
+            "core.app.handle_tournament_results",
+            return_value=partial,
+        ) as capture,
+        patch("core.app.dismiss_tournament_results_to_home") as dismiss,
+        patch("core.app.log_action_intent"),
+        patch("core.app.log_result"),
+    ):
+        assert app._observe_paused_terminal_boundary(
+            "TOURNAMENT_RESULTS",
+            frame,
+        )
+
+    assert capture.call_args.args == (frame,)
+    assert capture.call_args.kwargs["allow_ui_fallback"] is False
+    assert capture.call_args.kwargs["action_guard_fn"]() is False
+    dismiss.assert_not_called()
+    assert app._tournament_results_captured is True
+    assert app._tournament_result_details_complete is False
+    assert app._tournament_degradation_snapshot == degradation
+    assert app._tournament_degradation_snapshot_observed is True
+    app._mission_mgr.on_game_over.assert_called_once_with()
+    app._status_reporter.reset_coin_rate_samples.assert_called_once_with()
+
+
+def test_unbound_paused_terminal_claim_is_stable_across_fresh_frames():
+    evidence = {
+        "adb_target": "localhost:5555",
+        "target_generation": 4,
+    }
+    first = App._paused_terminal_boundary_fingerprint(
+        "TOURNAMENT_RESULTS",
+        np.zeros((8, 8, 3), dtype=np.uint8),
+        evidence,
+    )
+    animated = App._paused_terminal_boundary_fingerprint(
+        "TOURNAMENT_RESULTS",
+        np.ones((8, 8, 3), dtype=np.uint8),
+        {**evidence, "target_generation": 9},
+    )
+
+    assert first == animated
+    assert first != App._paused_terminal_boundary_fingerprint(
+        "GAME_OVER",
+        np.zeros((8, 8, 3), dtype=np.uint8),
+        evidence,
+    )
+
+
+def test_strict_pause_never_starts_terminal_save_serialization():
+    app = App.__new__(App)
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    context = {"terminal_save_report": {"status": "unavailable"}}
+    app._terminal_battle_bundle = MagicMock(
+        return_value=(context, object(), None)
+    )
+    app._terminal_save_refresh_required = MagicMock(return_value=True)
+    app._current_control_workflow_evidence = lambda: {
+        "game_state": "tournament_results"
+    }
+    app._supervisor = SimpleNamespace(
+        pause_terminal_save_refresh={"allowed": False},
+        claim_paused_terminal_save_refresh=MagicMock(),
+    )
+
+    with patch("core.app.GuardedPlayerSaveSerializer") as serializer:
+        result = app._paused_terminal_battle_bundle(
+            "TOURNAMENT_RESULTS",
+            frame,
+        )
+
+    assert result[0] is context
+    assert result[3] is frame
+    assert result[4] == "disabled"
+    app._supervisor.claim_paused_terminal_save_refresh.assert_not_called()
+    serializer.assert_not_called()
+
+
+def test_default_pause_claims_one_guarded_terminal_save_refresh():
+    app = App.__new__(App)
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    refreshed_frame = np.ones((1920, 1080, 3), dtype=np.uint8)
+    initial_context = {"terminal_save_report": {"status": "unavailable"}}
+    refreshed_context = {"terminal_save_report": {"status": "complete"}}
+    app._terminal_battle_bundle = MagicMock(
+        side_effect=(
+            (initial_context, object(), None),
+            (refreshed_context, object(), None),
+        )
+    )
+    app._terminal_save_refresh_required = MagicMock(return_value=True)
+    evidence = {
+        "game_state": "tournament_results",
+        "runtime_id": "runtime-1",
+        "pid": 123,
+        "adb_target": "localhost:5555",
+        "target_generation": 4,
+        "active_round_identity_fingerprint": "a" * 64,
+    }
+    app._current_control_workflow_evidence = lambda: evidence
+    app._current_control_request_identity = lambda: {
+        "state_request_id": "pause-1"
+    }
+    claim = {
+        "claim_id": "claim-1",
+        "terminal_state": "TOURNAMENT_RESULTS",
+        "boundary_fingerprint": "b" * 64,
+        "status": "claimed",
+    }
+    app._supervisor = SimpleNamespace(
+        pause_terminal_save_refresh={"allowed": True},
+        claim_paused_terminal_save_refresh=MagicMock(return_value=claim),
+        complete_paused_terminal_save_refresh=MagicMock(return_value=True),
+        pause_for_catastrophic_failure=MagicMock(),
+    )
+    app._player_save_acquirer = object()
+    app._paused_terminal_save_refresh_context_matches = MagicMock(
+        return_value=True
+    )
+    app._paused_terminal_save_refresh_action_allowed = MagicMock(
+        return_value=True
+    )
+    app._capture_frame = MagicMock(return_value=refreshed_frame)
+    app._record_control_observation = MagicMock()
+    app._match_trace = False
+    serialized = SimpleNamespace(
+        status=GuardedSerializationStatus.COMPLETE,
+        reason="serialized and restored",
+        lifecycle_input_attempted=True,
+        source_restored=True,
+    )
+    serializer = MagicMock()
+    serializer.acquire.return_value = serialized
+
+    with (
+        patch(
+            "core.app.GuardedPlayerSaveSerializer",
+            return_value=serializer,
+        ) as serializer_type,
+        patch(
+            "core.app.detect_state_and_overlays",
+            return_value={"state": "TOURNAMENT_RESULTS"},
+        ),
+    ):
+        result = app._paused_terminal_battle_bundle(
+            "TOURNAMENT_RESULTS",
+            frame,
+        )
+
+    app._supervisor.claim_paused_terminal_save_refresh.assert_called_once()
+    assert serializer_type.call_args.kwargs[
+        "allow_paused_terminal_save_refresh"
+    ] is True
+    serializer.acquire.assert_called_once()
+    app._supervisor.complete_paused_terminal_save_refresh.assert_called_once_with(
+        "claim-1",
+        status="complete",
+        reason="serialized and restored",
+    )
+    app._supervisor.pause_for_catastrophic_failure.assert_not_called()
+    assert result[0] is refreshed_context
+    assert result[3] is refreshed_frame
+    assert result[4] == "complete"
+
+
+def test_catastrophic_pause_blocks_a_claimed_terminal_save_refresh():
+    app = App.__new__(App)
+    evidence = {
+        "game_state": "game_over",
+        "runtime_id": "runtime-1",
+        "pid": 123,
+        "adb_target": "localhost:5555",
+        "target_generation": 4,
+    }
+    claim = {
+        "claim_id": "claim-1",
+        "state_request_id": "pause-1",
+        "terminal_state": "GAME_OVER",
+        "boundary_fingerprint": "b" * 64,
+        "binding": {
+            field: evidence[field]
+            for field in (
+                "runtime_id",
+                "pid",
+                "adb_target",
+                "target_generation",
+            )
+        },
+    }
+    app._supervisor = SimpleNamespace(
+        control_state="PAUSED",
+        apply_control=lambda: None,
+        paused_terminal_save_refresh_claim_current=lambda _claim: True,
+        catastrophic_pause_hold={"active": True},
+    )
+    app._current_control_request_identity = lambda: {
+        "state_request_id": "pause-1"
+    }
+    app._current_control_workflow_evidence = lambda: evidence
+    app._uninstalled_durable_action_owner_pending = lambda: False
+
+    assert not app._paused_terminal_save_refresh_context_matches(claim)
+
+
+@pytest.mark.parametrize(
+    ("capture_complete", "capture_stats"),
+    ((True, False), (False, True)),
+)
+def test_resumed_game_over_route_reuses_record_captured_during_pause(
+    capture_complete,
+    capture_stats,
+):
+    strategy = get_strategy("tournament")
+    manager = MagicMock()
+    manager.strategy = strategy
+    manager.ctx = MissionContext(data={"mission_vars": {}})
+    manager.session_preflight_repair_in_progress.return_value = False
+    app = App.__new__(App)
+    app._mission_mgr = manager
+    app._supervisor = SimpleNamespace(
+        manual_control=None,
+        apply_control=MagicMock(),
+    )
+    app._status_reporter = MagicMock()
+    app._fast_game_over = False
+    app._pending_game_over_route = None
+    app._apply_pending_strategy = MagicMock()
+    app._strategy_boundary_confirmed = True
+    app._active_action_authority_owner = None
+    _bind_terminal_context(app)
+    evidence = {
+        "game_state": "game_over",
+        "runtime_id": "runtime-1",
+        "pid": 123,
+        "adb_target": "localhost:5555",
+        "target_generation": 4,
+        "active_round_identity_fingerprint": "a" * 64,
+    }
+    app._current_control_workflow_evidence = lambda: evidence
+    app._terminal_battle_bundle = MagicMock(
+        return_value=(
+            {"terminal_save_report": {"status": "complete"}},
+            None,
+            None,
+        )
+    )
+    app._runtime_action_guard = MagicMock(return_value=True)
+    paused_record = {
+        "battle_id": "Battle20260718T062000-0700",
+        "captured_at": "2026-07-18T06:20:00-07:00",
+    }
+    app._paused_game_over_record = {
+        "binding": dict(evidence),
+        "record": paused_record,
+        "boundary_finalized": True,
+        "capture_complete": capture_complete,
+        "no_strategy_run": False,
+        "observed_run_configuration": None,
+    }
+    outcome = SimpleNamespace(
+        route_completed=True,
+        route="wait",
+        record=None,
+        stats_status="skipped",
+        failure_step=None,
+    )
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    previous_mode = AUTOMATION.mode
+    try:
+        AUTOMATION.mode = ExecMode.WAIT
+        with patch("core.app.handle_game_over", return_value=outcome) as handler:
+            app._handle_primary_states("GAME_OVER", set(), frame)
+    finally:
+        AUTOMATION.mode = previous_mode
+
+    assert handler.call_args.kwargs["capture_stats"] is capture_stats
+    assert handler.call_args.kwargs["battle_id"] == paused_record["battle_id"]
+    assert handler.call_args.kwargs["captured_at"].isoformat() == (
+        paused_record["captured_at"]
+    )
+    manager.on_game_over.assert_not_called()
+    app._status_reporter.reset_coin_rate_samples.assert_not_called()
+    assert app._paused_game_over_record is None
 
 
 def test_observation_only_tournament_record_keeps_observed_config_and_degradation():

@@ -1465,17 +1465,22 @@ Process request examples:
   instead of inventing Cell spending. Both server and client require false
   action authority, and this release has no Lab Speedup mutation path.
 - Persistent indefinite and timed Pause, explicit Automation Enabled, and
-  requested-versus-acknowledged state. The text defines Paused as zero
-  automated input while observation continues and does not describe Enabled
-  as the game being in `RUNNING`.
+  requested-versus-acknowledged state. The text defines Paused as blocking
+  ordinary game interaction while observation and save analysis continue. Its
+  checked-by-default terminal-save option permits one guarded Android
+  Home/restore serialization at a proven Game Over or Tournament Results
+  boundary only when the first stable save still reports an active round;
+  clearing it creates a strict Pause with no lifecycle input. Enabled is not
+  described as the game being in `RUNNING`.
 - Separate Start/Stop Automation, exact-state Start Battle/Attach to Battle,
   and Take Manual Control/Return Control controls. Their availability and
   pending/acknowledged/rejected/interrupted state comes from Linux, not local
   GUI inference. Start Automation always leaves actions Paused. This contract
   was introduced in server revision 30; the current client requires revision
-  51 plus `active_battle_screen_metrics_v1`, `active_run_metrics_v1`,
+  52 plus `active_battle_screen_metrics_v1`, `active_run_metrics_v1`,
   `cell_balance_tracking_v1`,
   `better_control_model_v2`,
+  `paused_terminal_save_refresh_v1`,
   `runtime_control_acknowledgements_v1`,
   `strategy_aware_attach_v1`,
   `bluestacks_maintenance_v2`, `bluestacks_operator_restart_v1`, and

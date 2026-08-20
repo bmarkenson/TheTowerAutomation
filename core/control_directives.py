@@ -63,6 +63,10 @@ DEFAULT_IDLE_TIMEOUT_SECONDS = 30 * 60
 DEFAULT_IDLE_TIMEOUT_STRATEGY = "farm_t19_ad_assist"
 TERMINAL_IDLE_TIMEOUT_SCHEMA_VERSION = 1
 TERMINAL_IDLE_TIMEOUT_STATUSES = frozenset({"holding", "returning_home"})
+PAUSE_TERMINAL_SAVE_REFRESH_SCHEMA_VERSION = 1
+PAUSE_TERMINAL_SAVE_REFRESH_STATUSES = frozenset(
+    {"claimed", "complete", "unavailable", "blocked"}
+)
 VALID_GAME_SPEED_TARGETS = tuple(
     [step / 2 for step in range(13)] + [6.3]
 )
@@ -90,6 +94,106 @@ INTERACTIVE_DEVELOPMENT_REQUEST_STATES = frozenset(
 )
 _MAX_EXCLUSIVE_VALIDATION_RECEIPTS = 12
 EMULATOR_LOCATION_SCHEMA_VERSION = 1
+
+
+def normalize_pause_terminal_save_refresh(
+    value: object,
+    *,
+    state_request_id: object,
+) -> Optional[dict[str, Any]]:
+    """Validate one per-Pause terminal serialization policy and claim ledger."""
+
+    if not isinstance(value, Mapping):
+        return None
+    expected_request_id = str(state_request_id or "").strip()
+    ledger_request_id = str(value.get("state_request_id") or "").strip()
+    allowed = value.get("allowed")
+    raw_attempts = value.get("attempts")
+    if (
+        value.get("schema_version")
+        != PAUSE_TERMINAL_SAVE_REFRESH_SCHEMA_VERSION
+        or not expected_request_id
+        or ledger_request_id != expected_request_id
+        or type(allowed) is not bool
+        or not isinstance(raw_attempts, list)
+    ):
+        return None
+
+    attempts: list[dict[str, Any]] = []
+    seen_boundaries: set[str] = set()
+    seen_claims: set[str] = set()
+    for raw_attempt in raw_attempts:
+        if not isinstance(raw_attempt, Mapping):
+            return None
+        claim_id = str(raw_attempt.get("claim_id") or "").strip()
+        boundary = str(
+            raw_attempt.get("boundary_fingerprint") or ""
+        ).strip().lower()
+        terminal_state = str(
+            raw_attempt.get("terminal_state") or ""
+        ).strip().upper()
+        status = str(raw_attempt.get("status") or "").strip().lower()
+        claimed_at = str(raw_attempt.get("claimed_at") or "").strip()
+        if (
+            not claim_id
+            or len(claim_id) > 128
+            or len(boundary) != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in boundary
+            )
+            or terminal_state not in {"GAME_OVER", "TOURNAMENT_RESULTS"}
+            or status not in PAUSE_TERMINAL_SAVE_REFRESH_STATUSES
+            or not claimed_at
+            or len(claimed_at) > 64
+            or boundary in seen_boundaries
+            or claim_id in seen_claims
+        ):
+            return None
+        attempt = {
+            "claim_id": claim_id,
+            "boundary_fingerprint": boundary,
+            "terminal_state": terminal_state,
+            "claimed_at": claimed_at,
+            "status": status,
+        }
+        completed_at = str(raw_attempt.get("completed_at") or "").strip()
+        if completed_at:
+            if len(completed_at) > 64:
+                return None
+            attempt["completed_at"] = completed_at
+        reason = " ".join(str(raw_attempt.get("reason") or "").split())
+        if reason:
+            attempt["reason"] = reason[:256]
+        attempts.append(attempt)
+        seen_boundaries.add(boundary)
+        seen_claims.add(claim_id)
+
+    return {
+        "schema_version": PAUSE_TERMINAL_SAVE_REFRESH_SCHEMA_VERSION,
+        "state_request_id": ledger_request_id,
+        "allowed": allowed,
+        "attempts": attempts,
+    }
+
+
+def _new_pause_terminal_save_refresh(
+    state_request_id: str,
+    *,
+    allowed: bool,
+) -> dict[str, Any]:
+    """Return a fresh policy for one newly requested Pause episode."""
+
+    return {
+        "schema_version": PAUSE_TERMINAL_SAVE_REFRESH_SCHEMA_VERSION,
+        "state_request_id": str(state_request_id),
+        "allowed": bool(allowed),
+        "attempts": [],
+    }
+
+
+def _clear_pause_terminal_save_refresh(data: dict[str, Any]) -> None:
+    data.pop("pause_terminal_save_refresh", None)
 
 
 def normalize_terminal_idle_timeout(value: object) -> Optional[dict[str, Any]]:
@@ -347,6 +451,26 @@ class ControlDirectiveStore:
         terminal_idle_timeout = normalize_terminal_idle_timeout(
             data.get("terminal_idle_timeout")
         )
+        raw_pause_refresh = data.get("pause_terminal_save_refresh")
+        pause_terminal_save_refresh = (
+            normalize_pause_terminal_save_refresh(
+                raw_pause_refresh,
+                state_request_id=data.get("state_request_id"),
+            )
+            if state == "PAUSED"
+            else None
+        )
+        if (
+            state == "PAUSED"
+            and raw_pause_refresh is None
+            and str(data.get("state_request_id") or "").strip()
+        ):
+            # A pre-feature Pause retains the new default without inventing a
+            # claim. The first claim materializes the same policy atomically.
+            pause_terminal_save_refresh = _new_pause_terminal_save_refresh(
+                str(data["state_request_id"]),
+                allowed=True,
+            )
         terminal_idle_remaining_seconds = None
         if terminal_idle_timeout is not None:
             terminal_idle_remaining_seconds = max(
@@ -375,6 +499,14 @@ class ControlDirectiveStore:
                 "terminal idle-timeout directive is malformed"
                 if data.get("terminal_idle_timeout") is not None
                 and terminal_idle_timeout is None
+                else None
+            ),
+            "pause_terminal_save_refresh": pause_terminal_save_refresh,
+            "pause_terminal_save_refresh_error": (
+                "paused terminal save refresh directive is malformed"
+                if state == "PAUSED"
+                and raw_pause_refresh is not None
+                and pause_terminal_save_refresh is None
                 else None
             ),
             "game_speed_target": _valid_game_speed_target(
@@ -522,6 +654,7 @@ class ControlDirectiveStore:
             with self._lock():
                 current = self._read_unlocked()
                 added: dict[str, str] = {}
+                changed = False
                 for value_field, identity_field in fields:
                     if value_field not in current:
                         if value_field not in implicit_defaults:
@@ -556,7 +689,24 @@ class ControlDirectiveStore:
                     request_id = uuid4().hex
                     current[identity_field] = request_id
                     added[identity_field] = request_id
-                if added:
+                    changed = True
+                state_request_id = str(
+                    current.get("state_request_id") or ""
+                ).strip()
+                if (
+                    str(current.get("state") or "").strip().upper()
+                    == "PAUSED"
+                    and valid_request_id(state_request_id)
+                    and "pause_terminal_save_refresh" not in current
+                ):
+                    current["pause_terminal_save_refresh"] = (
+                        _new_pause_terminal_save_refresh(
+                            state_request_id,
+                            allowed=True,
+                        )
+                    )
+                    changed = True
+                if changed:
                     self._write_unlocked(current)
                 return added
 
@@ -957,6 +1107,7 @@ class ControlDirectiveStore:
         evidence: Mapping[str, object],
         reason: str = "operator",
         surrender_collection: str = "minimal",
+        allow_terminal_save_refresh: bool = True,
         source: Optional[str] = None,
         now: Optional[float] = None,
     ) -> dict[str, Any]:
@@ -977,6 +1128,8 @@ class ControlDirectiveStore:
             raise ValueError(
                 "Manual surrender collection must be minimal or full"
             )
+        if type(allow_terminal_save_refresh) is not bool:
+            raise ValueError("allow_terminal_save_refresh must be a boolean")
 
         def mutate(data: dict[str, Any]) -> dict[str, Any]:
             if str(data.get("state") or "").strip().upper() == "STOPPED":
@@ -1038,7 +1191,14 @@ class ControlDirectiveStore:
             data.pop("resume_at", None)
             _consume_terminal_idle_timeout(data, timestamp=timestamp)
             data["state_updated_at"] = timestamp
-            data["state_request_id"] = uuid4().hex
+            state_request_id = uuid4().hex
+            data["state_request_id"] = state_request_id
+            data["pause_terminal_save_refresh"] = (
+                _new_pause_terminal_save_refresh(
+                    state_request_id,
+                    allowed=allow_terminal_save_refresh,
+                )
+            )
             data["updated_at"] = timestamp
             data["updated_by"] = source or "operator"
             return data
@@ -1520,6 +1680,7 @@ class ControlDirectiveStore:
             data["manual_control"] = manual
             data["state"] = "RUNNING"
             data.pop("resume_at", None)
+            _clear_pause_terminal_save_refresh(data)
             data["state_updated_at"] = timestamp
             data["state_request_id"] = uuid4().hex
             data["updated_at"] = timestamp
@@ -2088,6 +2249,7 @@ class ControlDirectiveStore:
         state: str,
         *,
         resume_at: Optional[float] = None,
+        allow_terminal_save_refresh: bool = True,
         source: Optional[str] = None,
     ) -> dict[str, Any]:
         """Persist a validated run state while preserving unrelated fields."""
@@ -2103,6 +2265,8 @@ class ControlDirectiveStore:
             raise ValueError("resume_at must be a finite timestamp")
         if normalized != "PAUSED" and deadline is not None:
             raise ValueError("resume_at is only valid for PAUSED")
+        if type(allow_terminal_save_refresh) is not bool:
+            raise ValueError("allow_terminal_save_refresh must be a boolean")
 
         def mutate(data: dict[str, Any]) -> dict[str, Any]:
             timestamp = _updated_at()
@@ -2113,7 +2277,17 @@ class ControlDirectiveStore:
                 data["resume_at"] = deadline
             data["updated_at"] = timestamp
             data["state_updated_at"] = timestamp
-            data["state_request_id"] = uuid4().hex
+            state_request_id = uuid4().hex
+            data["state_request_id"] = state_request_id
+            if normalized == "PAUSED":
+                data["pause_terminal_save_refresh"] = (
+                    _new_pause_terminal_save_refresh(
+                        state_request_id,
+                        allowed=allow_terminal_save_refresh,
+                    )
+                )
+            else:
+                _clear_pause_terminal_save_refresh(data)
             if source:
                 data["updated_by"] = source
             return data
@@ -2125,6 +2299,7 @@ class ControlDirectiveStore:
         self,
         *,
         resume_at: Optional[float] = None,
+        allow_terminal_save_refresh: Optional[bool] = None,
         source: Optional[str] = None,
     ) -> dict[str, Any]:
         """Persist Pause without ever overriding explicit Stop."""
@@ -2132,11 +2307,24 @@ class ControlDirectiveStore:
         deadline = _finite_number(resume_at)
         if resume_at is not None and deadline is None:
             raise ValueError("resume_at must be a finite timestamp")
+        if (
+            allow_terminal_save_refresh is not None
+            and type(allow_terminal_save_refresh) is not bool
+        ):
+            raise ValueError("allow_terminal_save_refresh must be a boolean")
 
         def mutate(data: dict[str, Any]) -> dict[str, Any]:
             if str(data.get("state") or "").strip().upper() == "STOPPED":
                 return data
             timestamp = _updated_at()
+            previous_state = str(data.get("state") or "").strip().upper()
+            previous_request_id = str(
+                data.get("state_request_id") or ""
+            ).strip()
+            previous_policy = normalize_pause_terminal_save_refresh(
+                data.get("pause_terminal_save_refresh"),
+                state_request_id=previous_request_id,
+            )
             data["state"] = "PAUSED"
             data.pop("resume_at", None)
             _consume_terminal_idle_timeout(data, timestamp=timestamp)
@@ -2144,13 +2332,170 @@ class ControlDirectiveStore:
                 data["resume_at"] = deadline
             data["updated_at"] = timestamp
             data["state_updated_at"] = timestamp
-            data["state_request_id"] = uuid4().hex
+            state_request_id = uuid4().hex
+            data["state_request_id"] = state_request_id
+            if (
+                allow_terminal_save_refresh is None
+                and previous_state == "PAUSED"
+                and previous_policy is not None
+            ):
+                previous_policy["state_request_id"] = state_request_id
+                data["pause_terminal_save_refresh"] = previous_policy
+            elif (
+                allow_terminal_save_refresh is None
+                and previous_state == "PAUSED"
+                and data.get("pause_terminal_save_refresh") is not None
+            ):
+                # Do not launder a malformed current policy into input
+                # authority during an internal safety re-Pause.
+                data["pause_terminal_save_refresh"] = (
+                    _new_pause_terminal_save_refresh(
+                        state_request_id,
+                        allowed=False,
+                    )
+                )
+            else:
+                data["pause_terminal_save_refresh"] = (
+                    _new_pause_terminal_save_refresh(
+                        state_request_id,
+                        allowed=(
+                            True
+                            if allow_terminal_save_refresh is None
+                            else allow_terminal_save_refresh
+                        ),
+                    )
+                )
             if source:
                 data["updated_by"] = source
             return data
 
         with self._dispatch_boundary():
             return self.update(mutate)
+
+    def claim_paused_terminal_save_refresh(
+        self,
+        *,
+        state_request_id: str,
+        terminal_state: str,
+        boundary_fingerprint: str,
+        now: Optional[float] = None,
+    ) -> Optional[dict[str, Any]]:
+        """Claim at most one forced refresh for one terminal boundary."""
+
+        expected_request_id = str(state_request_id or "").strip()
+        terminal = str(terminal_state or "").strip().upper()
+        boundary = str(boundary_fingerprint or "").strip().lower()
+        if not expected_request_id:
+            raise ValueError("terminal save refresh requires a Pause request id")
+        if terminal not in {"GAME_OVER", "TOURNAMENT_RESULTS"}:
+            raise ValueError("terminal save refresh requires a terminal state")
+        if len(boundary) != 64 or any(
+            character not in "0123456789abcdef" for character in boundary
+        ):
+            raise ValueError("terminal save refresh boundary is invalid")
+        claim_id = uuid4().hex
+        claimed_at = _timestamp_at(now)
+
+        def mutate(data: dict[str, Any]) -> dict[str, Any]:
+            if (
+                str(data.get("state") or "").strip().upper() != "PAUSED"
+                or str(data.get("state_request_id") or "").strip()
+                != expected_request_id
+            ):
+                return data
+            raw_policy = data.get("pause_terminal_save_refresh")
+            if raw_policy is None:
+                policy = _new_pause_terminal_save_refresh(
+                    expected_request_id,
+                    allowed=True,
+                )
+            else:
+                policy = normalize_pause_terminal_save_refresh(
+                    raw_policy,
+                    state_request_id=expected_request_id,
+                )
+            if policy is None or policy["allowed"] is not True:
+                return data
+            if any(
+                attempt["boundary_fingerprint"] == boundary
+                for attempt in policy["attempts"]
+            ):
+                return data
+            policy["attempts"] = policy["attempts"] + [
+                {
+                    "claim_id": claim_id,
+                    "boundary_fingerprint": boundary,
+                    "terminal_state": terminal,
+                    "claimed_at": claimed_at,
+                    "status": "claimed",
+                }
+            ]
+            data["pause_terminal_save_refresh"] = policy
+            data["updated_at"] = claimed_at
+            data["updated_by"] = "runtime-terminal-save-refresh"
+            return data
+
+        with self._dispatch_boundary():
+            saved = self.update(mutate)
+        policy = normalize_pause_terminal_save_refresh(
+            saved.get("pause_terminal_save_refresh"),
+            state_request_id=saved.get("state_request_id"),
+        )
+        if policy is None:
+            return None
+        for attempt in policy["attempts"]:
+            if attempt["claim_id"] == claim_id:
+                return dict(attempt)
+        return None
+
+    def complete_paused_terminal_save_refresh(
+        self,
+        claim_id: str,
+        *,
+        status: str,
+        reason: str,
+        now: Optional[float] = None,
+    ) -> bool:
+        """Finalize only a still-retained terminal refresh claim."""
+
+        normalized_claim_id = str(claim_id or "").strip()
+        normalized_status = str(status or "").strip().lower()
+        normalized_reason = " ".join(str(reason or "").split())[:256]
+        if not normalized_claim_id:
+            raise ValueError("terminal save refresh claim id is required")
+        if normalized_status not in PAUSE_TERMINAL_SAVE_REFRESH_STATUSES - {
+            "claimed"
+        }:
+            raise ValueError("terminal save refresh completion status is invalid")
+        completed_at = _timestamp_at(now)
+        changed = False
+
+        def mutate(data: dict[str, Any]) -> dict[str, Any]:
+            nonlocal changed
+            policy = normalize_pause_terminal_save_refresh(
+                data.get("pause_terminal_save_refresh"),
+                state_request_id=data.get("state_request_id"),
+            )
+            if policy is None:
+                return data
+            for attempt in policy["attempts"]:
+                if attempt["claim_id"] != normalized_claim_id:
+                    continue
+                if attempt["status"] != "claimed":
+                    return data
+                attempt["status"] = normalized_status
+                attempt["completed_at"] = completed_at
+                if normalized_reason:
+                    attempt["reason"] = normalized_reason
+                data["pause_terminal_save_refresh"] = policy
+                data["updated_at"] = completed_at
+                data["updated_by"] = "runtime-terminal-save-refresh"
+                changed = True
+                return data
+            return data
+
+        self.update(mutate)
+        return changed
 
     def set_state_and_interrupt_operator_workflows(
         self,
@@ -2242,7 +2587,17 @@ class ControlDirectiveStore:
             data.pop("resume_at", None)
             _consume_terminal_idle_timeout(data, timestamp=timestamp)
             data["state_updated_at"] = timestamp
-            data["state_request_id"] = uuid4().hex
+            state_request_id = uuid4().hex
+            data["state_request_id"] = state_request_id
+            if normalized == "PAUSED":
+                data["pause_terminal_save_refresh"] = (
+                    _new_pause_terminal_save_refresh(
+                        state_request_id,
+                        allowed=True,
+                    )
+                )
+            else:
+                _clear_pause_terminal_save_refresh(data)
             data["updated_at"] = timestamp
             data["updated_by"] = source
             return data
@@ -3866,6 +4221,7 @@ class ControlDirectiveStore:
                     return None
                 current["state"] = "RUNNING"
                 current.pop("resume_at", None)
+                _clear_pause_terminal_save_refresh(current)
                 timestamp = _updated_at()
                 current["updated_at"] = timestamp
                 current["state_updated_at"] = timestamp
@@ -4701,6 +5057,8 @@ __all__ = [
     "INTERACTIVE_DEVELOPMENT_REQUEST_STATES",
     "LEGACY_MODE_ALIASES",
     "MAXIMUM_GAME_SPEED_TARGET",
+    "PAUSE_TERMINAL_SAVE_REFRESH_SCHEMA_VERSION",
+    "PAUSE_TERMINAL_SAVE_REFRESH_STATUSES",
     "VALID_GAME_SPEED_TARGETS",
     "VALID_MODES",
     "VALID_STATES",
@@ -4710,4 +5068,5 @@ __all__ = [
     "normalize_game_speed_target",
     "normalize_emulator_maintenance",
     "normalize_interactive_development_lease",
+    "normalize_pause_terminal_save_refresh",
 ]

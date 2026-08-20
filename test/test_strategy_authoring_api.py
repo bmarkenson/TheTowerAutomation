@@ -1428,8 +1428,9 @@ def test_authoring_http_status_codes_auth_compatibility_and_no_plan(tmp_path):
 
         status, server_status = request("GET", "/api/v1/status")
         assert status == 200
-        assert server_status["server_revision"] == CONTROL_SURFACE_REVISION == 51
+        assert server_status["server_revision"] == CONTROL_SURFACE_REVISION == 52
         assert "better_control_model_v2" in CONTROL_SURFACE_CAPABILITIES
+        assert "paused_terminal_save_refresh_v1" in CONTROL_SURFACE_CAPABILITIES
         assert (
             "runtime_control_acknowledgements_v1"
             in CONTROL_SURFACE_CAPABILITIES

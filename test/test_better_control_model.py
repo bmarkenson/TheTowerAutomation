@@ -2053,6 +2053,7 @@ def test_take_manual_control_atomically_requests_indefinite_pause(tmp_path):
     assert manual["status"] == "pause_requested"
     assert current["state"] == "PAUSED"
     assert current["resume_at"] is None
+    assert current["pause_terminal_save_refresh"]["allowed"] is True
     assert current["battle_workflow"]["request_id"] == workflow["request_id"]
     assert current["battle_workflow"]["status"] == "interrupted"
 
@@ -2068,6 +2069,19 @@ def test_take_manual_control_atomically_requests_indefinite_pause(tmp_path):
     )
     assert returned["status"] == "return_requested"
     assert store.status()["state"] == "PAUSED"
+
+
+def test_take_manual_control_can_request_strict_pause(tmp_path):
+    store = ControlDirectiveStore(tmp_path / "automation_ctl.json")
+    store.set_state("RUNNING", source="test")
+
+    store.request_manual_control(
+        evidence=_evidence(observation_id="runtime-1:2"),
+        allow_terminal_save_refresh=False,
+        source="test",
+    )
+
+    assert store.status()["pause_terminal_save_refresh"]["allowed"] is False
 
 
 def test_control_surface_exposes_separate_dimensions_and_exact_actions(tmp_path):
@@ -2369,6 +2383,23 @@ def test_control_surface_take_and_return_control_require_pause_ack(tmp_path):
         "return_requested"
     )
     assert returned["control"]["state"] == "PAUSED"
+
+
+def test_control_surface_take_manual_control_can_request_strict_pause(tmp_path):
+    service = ControlSurfaceService(repository_root=tmp_path)
+    evidence = _evidence(game_state="active_battle")
+    _publish_runtime_observation(service, evidence)
+
+    taken = service.apply_control(
+        {
+            "action": "take_manual_control",
+            "allow_terminal_save_refresh": False,
+        }
+    )
+
+    assert (
+        taken["control"]["pause_terminal_save_refresh"]["allowed"] is False
+    )
 
 
 def test_operator_startup_waits_for_matching_intent_and_enable(

@@ -160,6 +160,110 @@ def test_pause_remains_authoritative_until_explicit_enable(
     assert AUTOMATION.state.value == "RUNNING"
 
 
+def test_pause_terminal_save_refresh_policy_defaults_allowed_and_strict_persists(
+    tmp_path,
+):
+    control_file = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(control_file)
+
+    default_pause = store.set_state("PAUSED", source="test-default")
+    default_policy = store.status()["pause_terminal_save_refresh"]
+    assert default_policy == {
+        "schema_version": 1,
+        "state_request_id": default_pause["state_request_id"],
+        "allowed": True,
+        "attempts": [],
+    }
+
+    store.set_state("RUNNING", source="test-enable")
+    strict_pause = store.set_state(
+        "PAUSED",
+        allow_terminal_save_refresh=False,
+        source="test-strict",
+    )
+    restarted_store = ControlDirectiveStore(control_file)
+    strict_policy = restarted_store.status()["pause_terminal_save_refresh"]
+    assert strict_policy["state_request_id"] == strict_pause["state_request_id"]
+    assert strict_policy["allowed"] is False
+
+    internally_reasserted = restarted_store.set_paused_unless_stopped(
+        source="test-safety-repause"
+    )
+    preserved = restarted_store.status()["pause_terminal_save_refresh"]
+    assert preserved["state_request_id"] == internally_reasserted[
+        "state_request_id"
+    ]
+    assert preserved["allowed"] is False
+
+    restarted_store.set_state("RUNNING", source="test-enable-again")
+    assert restarted_store.status()["pause_terminal_save_refresh"] is None
+    next_pause = restarted_store.set_state("PAUSED", source="test-next-pause")
+    next_policy = restarted_store.status()["pause_terminal_save_refresh"]
+    assert next_policy["state_request_id"] == next_pause["state_request_id"]
+    assert next_policy["allowed"] is True
+
+
+def test_cli_can_request_strict_pause(tmp_path, monkeypatch):
+    _route_cli_to_live_service(monkeypatch, tmp_path)
+    control_file = tmp_path / "automation_ctl.json"
+
+    assert automation_ctl_main(
+        [
+            "--control-file",
+            str(control_file),
+            "pause",
+            "--strict-pause",
+        ]
+    ) == 0
+
+    policy = ControlDirectiveStore(control_file).status()[
+        "pause_terminal_save_refresh"
+    ]
+    assert policy["allowed"] is False
+
+
+def test_paused_terminal_save_refresh_claim_is_once_per_durable_boundary(
+    tmp_path,
+):
+    control_file = tmp_path / "automation_ctl.json"
+    store = ControlDirectiveStore(control_file)
+    paused = store.set_state("PAUSED", source="test")
+    boundary = "a" * 64
+
+    claim = store.claim_paused_terminal_save_refresh(
+        state_request_id=paused["state_request_id"],
+        terminal_state="TOURNAMENT_RESULTS",
+        boundary_fingerprint=boundary,
+        now=100.0,
+    )
+
+    assert claim is not None
+    assert claim["status"] == "claimed"
+    assert (
+        ControlDirectiveStore(control_file).claim_paused_terminal_save_refresh(
+            state_request_id=paused["state_request_id"],
+            terminal_state="TOURNAMENT_RESULTS",
+            boundary_fingerprint=boundary,
+            now=101.0,
+        )
+        is None
+    )
+
+    restarted = _supervisor(control_file)
+    restarted.apply_control()
+    assert restarted.paused_terminal_save_refresh_claim_current(claim)
+    assert restarted.complete_paused_terminal_save_refresh(
+        claim["claim_id"],
+        status="complete",
+        reason="serialized and restored",
+    )
+    assert not restarted.paused_terminal_save_refresh_claim_current(claim)
+    attempt = restarted.pause_terminal_save_refresh["attempts"][0]
+    assert attempt["boundary_fingerprint"] == boundary
+    assert attempt["status"] == "complete"
+    assert attempt["reason"] == "serialized and restored"
+
+
 def test_final_adb_boundary_consumes_pause_before_dispatch(tmp_path):
     control_file = tmp_path / "automation_ctl.json"
     store = ControlDirectiveStore(control_file)
