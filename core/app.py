@@ -3898,7 +3898,15 @@ class App:
         """Return current observation bound to this exact runtime owner."""
 
         observation = getattr(self, "_control_observation", None)
-        owner = self._supervisor.current_exclusive_validation_owner()
+        supervisor = getattr(self, "_supervisor", None)
+        owner_reader = getattr(
+            supervisor,
+            "current_exclusive_validation_owner",
+            None,
+        )
+        if not callable(owner_reader):
+            return None
+        owner = owner_reader()
         if not isinstance(owner, Mapping):
             return None
         evidence = validate_workflow_evidence(
@@ -20525,22 +20533,35 @@ class App:
     def _handle_idle_timeout(self, new_state: str) -> bool:
         """Arm or consume bounded ordinary idle intent from fresh evidence."""
 
+        supervisor = getattr(self, "_supervisor", None)
+        if supervisor is None:
+            return False
         control_state = getattr(
-            self._supervisor,
+            supervisor,
             "control_state",
             getattr(AUTOMATION.state, "value", AUTOMATION.state),
         )
         if str(control_state).strip().upper() != "RUNNING":
             return False
+        timed_pause_request_id = getattr(
+            supervisor,
+            "timed_pause_expiry_pending",
+            None,
+        )
+        hold = getattr(supervisor, "terminal_idle_timeout", None)
+        if not (
+            (
+                isinstance(timed_pause_request_id, str)
+                and timed_pause_request_id
+            )
+            or isinstance(hold, Mapping)
+            or AUTOMATION.mode in {ExecMode.WAIT, ExecMode.HOME}
+        ):
+            return False
         evidence = self._current_control_workflow_evidence()
         if not isinstance(evidence, Mapping):
             return False
         game_state = str(evidence.get("game_state") or "").strip().lower()
-        timed_pause_request_id = getattr(
-            self._supervisor,
-            "timed_pause_expiry_pending",
-            None,
-        )
         if isinstance(timed_pause_request_id, str) and timed_pause_request_id:
             if game_state == "active_battle":
                 self._supervisor.consume_timed_pause_expiry(
@@ -20566,7 +20587,6 @@ class App:
                     self._observe_strategy_request()
                     return True
 
-        hold = getattr(self._supervisor, "terminal_idle_timeout", None)
         if (
             AUTOMATION.mode in {ExecMode.WAIT, ExecMode.HOME}
             and game_state

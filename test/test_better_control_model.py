@@ -206,6 +206,18 @@ def test_explicit_start_consumes_held_terminal_policy(tmp_path):
     assert store.status()["mode"] == "NEXT_BATTLE"
 
 
+def test_runtime_idle_timeout_is_a_noop_without_runtime_supervisor():
+    app = App.__new__(App)
+    original_mode = AUTOMATION.mode
+    try:
+        AUTOMATION.mode = ExecMode.WAIT
+        assert app._handle_idle_timeout("HOME_SCREEN") is False
+        app._supervisor = SimpleNamespace(control_state="RUNNING")
+        assert app._handle_idle_timeout("HOME_SCREEN") is False
+    finally:
+        AUTOMATION.mode = original_mode
+
+
 def test_runtime_arms_terminal_idle_timeout_from_fresh_wait_boundary():
     app = App.__new__(App)
     app._supervisor = MagicMock()
