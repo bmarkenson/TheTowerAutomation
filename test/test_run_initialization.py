@@ -1985,8 +1985,8 @@ class FarmProfileTests(unittest.TestCase):
                     },
                     {
                         "range_basis": "98.38m",
-                        "extra": "87.16m",
-                        "workshop": "80.37m",
+                        "extra": "80.37m",
+                        "workshop": "60.00m",
                     },
                 ],
             },
@@ -2045,8 +2045,8 @@ class FarmProfileTests(unittest.TestCase):
                         },
                         {
                             "range_basis": "98.38m",
-                            "extra": "87.16m",
-                            "workshop": "80.37m",
+                            "extra": "80.37m",
+                            "workshop": "60.00m",
                         },
                     ],
                 }

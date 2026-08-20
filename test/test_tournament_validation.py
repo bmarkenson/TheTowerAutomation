@@ -4493,8 +4493,8 @@ def test_validation_battle_bypasses_level_skips_without_seeding_completion():
             "type": "orb_distance_configure",
             "mode": "enforce",
             "range_basis": "98.38m",
-            "extra": "87.16m",
-            "workshop": "80.37m",
+            "extra": "80.37m",
+            "workshop": "60.00m",
             "range_presets": [
                 {
                     "range_basis": "30.00m",
@@ -4503,8 +4503,8 @@ def test_validation_battle_bypasses_level_skips_without_seeding_completion():
                 },
                 {
                     "range_basis": "98.38m",
-                    "extra": "87.16m",
-                    "workshop": "80.37m",
+                    "extra": "80.37m",
+                    "workshop": "60.00m",
                 },
             ],
         }

@@ -946,7 +946,7 @@ Cards, Demon
 Mode automatic recharge activation, Nuke manual-after-recharge activation,
 Tourney Workshop, Amplify Bots, Attack/Ally/Scout Guardians,
 Tournament/Milestone modules, Poison Swamp Stun `on`, Damage Slider `100%`, the
-Range `98.38m` Orb Distance pair Extra `87.16m` / Workshop `80.37m`, all nine
+Range `98.38m` Orb Distance pair Extra `80.37m` / Workshop `60.00m`, all nine
 Ultimate Weapons, and Spotlight Missiles. Tournament battles have no Perks, so
 Perks and Auto Perks are outside this contract.
 
