@@ -54,5 +54,7 @@
              Link="StrategySelectionCoordinator.cs" />
     <Compile Include="..\TheTower.ControlSurface\SaveMappingIntegrationViewModels.cs"
              Link="SaveMappingIntegrationViewModels.cs" />
+    <Compile Include="..\TheTower.ControlSurface\WorkflowGuideCatalog.cs"
+             Link="WorkflowGuideCatalog.cs" />
   </ItemGroup>
 </Project>

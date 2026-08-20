@@ -39,6 +39,46 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-20 In-client workflow guides
+
+- Exact implementation candidate `6809162` adds a modeless **Help > Workflow
+  guides…** window with version-matched topics for the independent control
+  layers, moving a running emulator between PCs, deciding whether and how to
+  restart BlueStacks, and editing/publishing a Strategy. Compact contextual
+  links select the matching topic from Connections, Diagnostics, and Strategy
+  Authoring without adding status-band content.
+- The structured guide catalog is packaged into the native executable and has
+  no API, process, emulator, control-directive, or publication owner. Its only
+  callback navigates to existing guarded surfaces, and Strategy Authoring
+  navigation preserves the normal compatibility/request-in-flight boundary.
+  The detailed repository runbooks remain canonical.
+- The native-client gate passed 26 focused Python/documentation tests, all 221
+  portable Control Surface tests, all 18 portable Tunnel Host tests, and the
+  Release WindowsDesktop cross-build with zero errors. Its only warnings were
+  the established read-only NuGet vulnerability-cache `NU1900`; the cross-build
+  is not Windows WPF runtime validation. Validation used development-
+  environment fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+- Production advanced from `0733b07` to source/validation receipt `64dcb44`
+  behind rollback tag `production-before-20260820T131141Z-0733b07`. The
+  complete native package was published from that exact production source at
+  06:13 PDT. Current `TheTower.ControlSurface.exe` is 72,525,931 bytes with
+  SHA-256
+  `4fd1035cd451bb430436c8cab637ee198990e6cd4fc7c99cf86b38580352126d`;
+  current `TheTower.TunnelHost.exe` is 35,172,131 bytes with SHA-256
+  `62579920880b102fc064270a20eec1f3423769c2c1e4c320d1f6181c9d848610`.
+  Retained slot 1 contains 72,508,490-byte Control Surface
+  `61d74b4970eca827a36ac7f04b91fc3637ce98dcf2f67a96cf2c2ff540965f0f`
+  and 35,172,076-byte Tunnel Host
+  `47c39bc480301eb35a4fec054e3b9ffca06d792870b8753589f3f705d46c62e5`;
+  retained slot 2 contains 72,508,729-byte Control Surface
+  `0e2368db42193644eb32ad6de9f4efca318bd054ca17829f8769ddc51237c09d`
+  and 35,172,132-byte Tunnel Host
+  `36c957dac319fc1ff0614b2ec7ad7dedcb190266e7bb8e766ba2a400ad1b99f5`.
+  Existing tracked receipts do not prove an exact source-commit association
+  for either surviving prior slot. Cross-publication does not establish
+  Windows WPF runtime behavior; that validation remains pending on Windows.
+
 ### 2026-08-19 Bounded idle timeout and fallback battle
 
 - Exact implementation candidate `a68edb2` makes ordinary idle intent bounded.

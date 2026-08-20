@@ -49,6 +49,7 @@ public partial class MainWindow : Window
     };
     private BattleListResponse _latestBattles = new();
     private BattleHistoryWindow? _battleHistoryWindow;
+    private WorkflowGuidesWindow? _workflowGuidesWindow;
     private CancellationTokenSource? _refreshCancellation;
     private CancellationTokenSource? _battleRefreshCancellation;
     private CancellationTokenSource? _activityRefreshCancellation;
@@ -184,6 +185,7 @@ public partial class MainWindow : Window
             _activityRefreshCancellation?.Cancel();
             _serviceStatusCancellation?.Cancel();
             _battleHistoryWindow?.Close();
+            _workflowGuidesWindow?.Close();
             await _tunnelHost.DisposeAsync();
             _hostPerformance.SnapshotUpdated -= HostPerformance_SnapshotUpdated;
             _hostPerformance.Dispose();
@@ -207,6 +209,80 @@ public partial class MainWindow : Window
     {
         SelectPage(SidebarTabs, SystemPageId);
         SelectPage(SystemTabs, ConnectionsSystemPageId);
+    }
+
+    private void OpenWorkflowGuides_Click(object sender, RoutedEventArgs e) =>
+        OpenWorkflowGuide(WorkflowGuideIds.Controls);
+
+    private void MoveEmulatorGuide_Click(object sender, RoutedEventArgs e) =>
+        OpenWorkflowGuide(WorkflowGuideIds.MoveEmulator);
+
+    private void RestartBlueStacksGuide_Click(
+        object sender,
+        RoutedEventArgs e) =>
+        OpenWorkflowGuide(WorkflowGuideIds.RestartBlueStacks);
+
+    private void OpenWorkflowGuide(string guideId)
+    {
+        try
+        {
+            if (_workflowGuidesWindow is not null)
+            {
+                _workflowGuidesWindow.SelectGuide(guideId);
+                if (_workflowGuidesWindow.WindowState == WindowState.Minimized)
+                {
+                    _workflowGuidesWindow.WindowState = WindowState.Normal;
+                }
+                _workflowGuidesWindow.Activate();
+                return;
+            }
+
+            var guides = new WorkflowGuidesWindow(
+                guideId,
+                NavigateFromWorkflowGuide)
+            {
+                Owner = this,
+            };
+            guides.Closed += (_, _) => _workflowGuidesWindow = null;
+            guides.Show();
+            _workflowGuidesWindow = guides;
+        }
+        catch (Exception exc)
+        {
+            _workflowGuidesWindow = null;
+            ShowError(new InvalidOperationException(
+                $"Unable to open Workflow Guides: {exc.Message}",
+                exc));
+        }
+    }
+
+    private async void NavigateFromWorkflowGuide(
+        WorkflowGuideDestination destination)
+    {
+        switch (destination)
+        {
+            case WorkflowGuideDestination.Overview:
+                SelectPage(SidebarTabs, OverviewPageId);
+                break;
+            case WorkflowGuideDestination.Connections:
+                SelectPage(SidebarTabs, SystemPageId);
+                SelectPage(SystemTabs, ConnectionsSystemPageId);
+                break;
+            case WorkflowGuideDestination.Diagnostics:
+                SelectPage(SidebarTabs, SystemPageId);
+                SelectPage(SystemTabs, DiagnosticsSystemPageId);
+                break;
+            case WorkflowGuideDestination.StrategyProfiles:
+                await OpenStrategyProfilesAsync();
+                return;
+            default:
+                throw new ArgumentOutOfRangeException(
+                    nameof(destination),
+                    destination,
+                    "Unknown workflow-guide destination");
+        }
+
+        Activate();
     }
 
     private async void ShowPreferences_Click(object sender, RoutedEventArgs e)
@@ -2002,8 +2078,19 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void StrategyProfiles_Click(object sender, RoutedEventArgs e)
+    private async void StrategyProfiles_Click(object sender, RoutedEventArgs e) =>
+        await OpenStrategyProfilesAsync();
+
+    private async Task OpenStrategyProfilesAsync()
     {
+        if (!StrategyProfilesMenuItem.IsEnabled)
+        {
+            ShowError(new InvalidOperationException(
+                "Strategy Authoring is unavailable until the Linux API is "
+                + "compatible and no Strategy request is in flight."));
+            return;
+        }
+
         try
         {
             var dialog = new StrategyProfilesWindow(
