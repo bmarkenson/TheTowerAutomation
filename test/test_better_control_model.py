@@ -6970,6 +6970,26 @@ def test_tournament_results_expose_verified_home_policy_separately(tmp_path):
     assert policy["compatibility_value"] == "HOME"
     assert policy["status"] == "selected"
     assert "verified OK-to-Home" in policy["reason"]
+    assert policy["timeout_seconds"] == 30 * 60
+    assert policy["timeout_strategy"] == "farm_t19_ad_assist"
+
+
+def test_control_model_exposes_active_terminal_timeout_countdown(tmp_path):
+    service = ControlSurfaceService(repository_root=tmp_path)
+    service.control_store.set_state("RUNNING", source="test")
+    service.control_store.set_mode("WAIT", source="test")
+    service.control_store.activate_terminal_idle_timeout(
+        evidence=_evidence(game_state="game_over"),
+        strategy="farm_t19",
+        timeout_seconds=1_800,
+        now=1_000.0,
+    )
+
+    policy = service.status(now=1_600.0)["control_model"]["when_battle_ends"]
+
+    assert policy["hold"]["status"] == "holding"
+    assert policy["remaining_seconds"] == 1_200
+    assert policy["timeout_strategy"] == "farm_t19"
 
 
 def test_cli_does_not_expose_raw_authority_aliases(tmp_path, capsys):

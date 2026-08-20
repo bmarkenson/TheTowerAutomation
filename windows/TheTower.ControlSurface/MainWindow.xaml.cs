@@ -3577,7 +3577,10 @@ public partial class MainWindow : Window
         var terminalPolicyStatus = status.ControlModel?.WhenBattleEnds;
         var terminalPolicyDisposition = terminalPolicyStatus is null
             ? modeDisposition
-            : $"{modeDisposition}; {FormatStatusToken(terminalPolicyStatus.Status)}"
+            : terminalPolicyStatus.RemainingSeconds is not null
+                ? $"holding · {FormatAge(terminalPolicyStatus.RemainingSeconds)} left; "
+                    + $"then {StrategyDisplayName(terminalPolicyStatus.TimeoutStrategy)}"
+                : $"{modeDisposition}; {FormatStatusToken(terminalPolicyStatus.Status)}"
                 + (string.IsNullOrWhiteSpace(terminalPolicyStatus.Reason)
                     ? ""
                     : $" — {terminalPolicyStatus.Reason}");

@@ -99,6 +99,6 @@ exact Game Over may carry one bound, one-shot New Battle launch through this
 required Home inventory. Changing the future policy after the battle ended or
 while already at Home does not create that launch; use **Start Battle** for an
 immediate start. Only restoration to verified Home may remain pending, and
-explicit `WAIT` continues to hold by operator choice. Architecture and
+explicit `WAIT` continues to hold until its bounded idle deadline. Architecture and
 evidence fields are in
 [`architecture/runtime.md`](../architecture/runtime.md#no-strategy-observation-profile).

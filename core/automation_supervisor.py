@@ -1585,14 +1585,11 @@ class AutomationSupervisor:
         self._last_applied_mode = None
         self.apply_control()
         self._battle_workflow = dict(workflow)
-        log_action_intent(
-            f"Starting timeout fallback Strategy {strategy}",
-            reason="the bounded idle hold expired without newer operator intent",
-            detail=(
-                "[IDLE_TIMEOUT] result=requested "
-                f"strategy={strategy} workflow={workflow.get('request_id')}"
-            ),
-            operation_id=str(workflow.get("request_id") or ""),
+        log(
+            "[IDLE_TIMEOUT] Bounded idle hold expired; requested the ordinary "
+            f"Start workflow {workflow.get('request_id')} with Strategy {strategy}",
+            "INFO",
+            console=True,
         )
         return dict(workflow)
 

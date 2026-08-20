@@ -4237,13 +4237,17 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert 'Content="x6.3 — Maximum available"' in native_xaml
     assert 'Content="Continue automatically"' in native_xaml
     assert 'Tag="NEXT_BATTLE"' in native_xaml
-    assert 'Content="Return / stay Home"' in native_xaml
+    assert 'Content="Home 30 min"' in native_xaml
     assert '<option value="NEXT_BATTLE">Continue automatically</option>' in html
-    assert '<option value="HOME">Return to / stay Home</option>' in html
+    assert '<option value="HOME">Return Home up to 30 min</option>' in html
+    assert 'data-control-action="pause" data-minutes="30">Pause 30 min' in html
+    assert "then ${humanize(terminalPolicy.timeout_strategy" in script
     assert "When this battle ends" in html
     assert 'id="terminalPolicyStatus"' in html
     assert "RetryModeButton" not in native_xaml
-    assert "MinimumServerRevision = 48" in native_compatibility
+    assert "MinimumServerRevision = 49" in native_compatibility
+    assert '"bounded_idle_timeout_v1"' in native_compatibility
+    assert "bounded_idle_timeout_v1" in CONTROL_SURFACE_CAPABILITIES
     assert '"active_battle_screen_metrics_v1"' in native_compatibility
     assert "active_battle_screen_metrics_v1" in CONTROL_SURFACE_CAPABILITIES
     assert '"active_run_metrics_v1"' in native_compatibility

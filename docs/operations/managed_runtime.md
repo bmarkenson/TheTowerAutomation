@@ -100,8 +100,10 @@ Game Over, Continue instead returns Home, applies any pending next Strategy,
 and runs that profile's normal bounded setup before starting another battle. A
 failed Go Home action retries from fresh terminal evidence; exhausted setup is
 reported and the next battle still starts degraded. **Wait** retains the
-supported terminal boundary, and **Return to / stay Home** follows its verified
-Home route without authorizing a launch. Selecting Continue while already at
+supported terminal boundary, and **Return Home** follows its verified Home
+route. Both are one-shot 30-minute holds: absent newer operator intent, expiry
+queues `farm_t19_ad_assist`, returns through verified Home when necessary, and
+creates the ordinary exact-evidence Start workflow. Selecting Continue while already at
 Home records and acknowledges only that future policy; it does not run save
 preflight, repair configuration, tap Battle, or tap Resume.
 
@@ -130,7 +132,10 @@ or another workflow also discards the old transition binding. `WAIT` is only
 the future terminal disposition: it neither blocks an explicitly authorized
 Start nor invalidates the resulting first-`RUNNING` evidence. The terminal
 continuation performs the same ownership check and clears its published pending
-state when authority or manual ownership supersedes it.
+state when authority or manual ownership supersedes it. The timeout grant is a
+separate durable exact-request hold; a Pause, Stop, manual-control request,
+policy/Strategy change, or explicit battle workflow clears it rather than
+allowing an old timer to override newer intent.
 
 ## Attach to a current battle
 
@@ -347,8 +352,9 @@ and advances the runtime target generation even though `localhost:<port>` is
 textually unchanged.
 
 For the cleanest performance attribution, move at a natural completed-battle or
-Home boundary before the next battle begins. Select **Wait** or
-**Return to / stay Home** as the battle-end policy in advance when appropriate;
+Home boundary before the next battle begins. Select **Wait 30 min** or
+**Home 30 min** as the battle-end policy in advance when appropriate, then
+establish the required acknowledged indefinite Pause before the hold expires;
 never Surrender an operator-owned battle merely to manufacture a handoff
 boundary. A mid-battle move is supported when it is operationally necessary,
 but that completed battle will intentionally be classified as mixed-host and

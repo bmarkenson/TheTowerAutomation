@@ -339,7 +339,7 @@ public sealed class ControlSurfaceCompatibilityTests
             """
             {
               "api_version": 1,
-              "server_revision": 48,
+              "server_revision": 49,
               "control_model": {
                 "observation": {
                   "available": true,
@@ -494,6 +494,7 @@ public sealed class ControlSurfaceCompatibilityTests
                 "active_run_metrics_v1",
                 "advisory_preflight_decisions",
                 "better_control_model_v2",
+                "bounded_idle_timeout_v1",
                 "bluestacks_maintenance_v1",
                 "bluestacks_maintenance_v2",
                 "bluestacks_operator_restart_v1",

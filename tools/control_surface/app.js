@@ -890,7 +890,9 @@ function renderBetterControlModel(model, compatible, captureCompatible, controlE
   const terminalPolicy = model.when_battle_ends || {};
   setText(
     "terminalPolicyStatus",
-    terminalPolicy.reason
+    terminalPolicy.remaining_seconds != null
+      ? `${humanize(terminalPolicy.hold?.status || "holding")} · ${formatRemaining(terminalPolicy.remaining_seconds)} · then ${humanize(terminalPolicy.timeout_strategy || "fallback strategy")}`
+      : terminalPolicy.reason
       ? `${humanize(terminalPolicy.status || "selected")} — ${terminalPolicy.reason}`
       : "Future terminal policy status is unavailable.",
   );
@@ -1785,7 +1787,8 @@ function humanize(value) {
 
 function formatTerminalPolicy(value) {
   if (value === "NEXT_BATTLE") return "Continue automatically";
-  if (value === "HOME") return "Return to / stay Home";
+  if (value === "WAIT") return "Wait up to 30 min";
+  if (value === "HOME") return "Return Home up to 30 min";
   return humanize(value || dash);
 }
 

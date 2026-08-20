@@ -339,8 +339,8 @@ acknowledgement, the request becomes `rejected` or `interrupted`. Stop and a new
 process boundary interrupt unfinished workflows. Home alone never enables or
 pauses input.
 
-At Tournament Results, `WAIT` is satisfied by retaining the screen. Continue
-automatically and Return/stay Home first preserve the result, then use the
+At Tournament Results, `WAIT` is satisfied by retaining the screen until its
+bounded idle deadline. Continue automatically and Home first preserve the result, then use the
 verified OK-to-Home dismissal owner. A failed dismissal retains the selected
 future policy and retries from fresh terminal evidence without changing action
 authority. Continue still does not make the policy control an immediate battle
@@ -366,6 +366,17 @@ authority request changes, manual/workflow supersession, Resume Battle,
 owner/target/battle-identity change, process replacement, or unexpected manual activity
 discard it. Being at Home, selecting a Strategy, or changing **When this battle
 ends** never creates one.
+
+`WAIT` and `HOME` additionally create a durable bounded-idle hold only after a
+fresh supported terminal or Home New observation. The hold is bound to the
+exact state and mode request identities. At 30 minutes it routes terminal
+screens through Home and atomically creates an ordinary Start Battle workflow
+for `farm_t19_ad_assist`; that workflow owns the same save, setup, tier, and
+first-Running identity gates as an operator Start. An explicit state, policy,
+Strategy, manual-control, or battle-workflow write clears the old hold. A timed
+Pause that expires during an active battle resumes that same battle instead of
+switching Strategy; if it expires at Home New, it creates the same fallback
+Start workflow. Indefinite safety and manual-control pauses never expire.
 
 The API retains `resume` as a deprecated alias for `enable` and the old
 directive-only `stop` for internal coordination compatibility. The latter sets
@@ -1404,7 +1415,7 @@ Process request examples:
   captures inside handlers are not canonical observations and do not move
   `SCREEN AGE` or create a misleading next-capture countdown. These values are
   presentation only and never establish battle identity or authority. Server
-  revision 48 and `active_battle_screen_metrics_v1` own this screen-metric
+  revision 49 and `active_battle_screen_metrics_v1` own this screen-metric
   projection; `active_run_metrics_v1` owns the latest accepted save-backed
   checkpoint in the same runtime snapshot. The native status row shows
   whole-run realized CPH, recent CPH from the latest compatible

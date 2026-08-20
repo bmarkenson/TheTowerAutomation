@@ -97,14 +97,20 @@ capture. When a strategy battle ends with repairable configuration degradation,
 that bounded repair before its exact one-shot launch. Failed Home navigation
 stays pending; exhausted repair records the new failure and still launches
 degraded. `WAIT` holds Game Over or Home; `HOME` goes Home and suppresses
-automatic Battle/Resume input. Pause blocks terminal navigation and Stop exits
+automatic Battle/Resume input. Either ordinary hold is bounded to 30 minutes
+from its first fresh terminal/Home observation. If no newer Pause, Stop,
+manual-control, policy, Strategy, or battle-workflow request supersedes it, the
+runtime returns through verified Home and starts `farm_t19_ad_assist` using the
+ordinary exact-evidence Start workflow. Pause blocks terminal navigation and Stop exits
 without a terminal tap. Game Over statistics and record enrichment are best
 effort; the selected terminal route is still attempted. A failed route tap
 stays pending for a fresh-evidence retry without changing action authority or
 the selected policy. Tournament Results satisfies `WAIT` by retaining the
 screen; `NEXT_BATTLE` and `HOME` persist the result and retry the verified
 dismissal route under the same authority-preserving rule. Legacy `RETRY`
-normalizes to `NEXT_BATTLE`.
+normalizes to `NEXT_BATTLE`. Safety, manual-control, startup, handoff, and
+explicit maintenance pauses remain indefinite; the primary operator Pause is
+the existing 30-minute timed directive.
 
 A persistent game-speed target is independent of Pause. Acknowledged values
 `x0.0`–`x6.0` are exact; `max`/`x6.3` means maximum available. It persists

@@ -373,11 +373,14 @@ wrong-runtime gate evidence is not displayed as an active gate. This structured
 presentation requires Linux revision 22 and `strategy_action_gate_v1`.
 
 The Automation Control panel uses selection highlights for requested and
-acknowledged authority. **Automation Paused** means zero automated device input
+acknowledged authority. The primary **Pause 30 min** action means zero automated device input
 while observation may continue. **Automation Enabled** permits guarded actions;
 it does not claim the game is Running. **When this battle ends** separately
-selects Continue automatically, Wait, or Return/stay Home; those choices never
-act as an immediate Start/Resume command. The buttons apply immediately, which
+selects Continue automatically, Wait 30 min, or Home 30 min; the bounded
+choices hold the reached boundary and then start Farm T19 Ad Assist unless a
+newer control request supersedes them. They never act as an immediate
+Start/Resume command. Indefinite Pause remains in the timed-Pause expander for
+manual-control, handoff, safety, and maintenance workflows. The buttons apply immediately, which
 prevents a periodic status refresh from replacing an unsaved selection.
 Automation-authority, manual-control, and terminal-policy writes have their own
 serialization gate: a click cancels an older status request and sends its POST
@@ -443,9 +446,10 @@ authorizes automation to Surrender. A Strategy repair Surrender is available
 only as the runtime's exact one-shot gate option for the current battle and
 reason.
 
-At Tournament Results, Wait retains the captured screen. Continue
-automatically and Return/stay Home use the verified dismissal owner after the
-result is saved; dismissal itself does not start another battle.
+At Tournament Results, Wait retains the captured screen until its bounded idle
+deadline. Continue automatically and Home 30 min use the verified dismissal
+owner after the result is saved; dismissal itself does not start another
+battle. Timeout later creates a separate exact Start workflow from Home.
 
 For an active process, a genuine strategy-dropdown change immediately submits
 one normal next-boundary request and leaves the current battle unchanged.
@@ -1123,7 +1127,7 @@ supported capabilities. The Windows build carries an expected API version, a
 minimum server revision, and required capabilities. Any mismatch produces a
 prominent full-width **Linux API update required** banner, disables dependent
 actions, and gives disabled Start buttons the same blocker in a tooltip. The
-current Windows build requires revision 48,
+current Windows build requires revision 49, `bounded_idle_timeout_v1`,
 `active_battle_screen_metrics_v1`, `active_run_metrics_v1`,
 `current_battle_perks_v1`, `better_control_model_v2`,
 `runtime_control_acknowledgements_v1`,

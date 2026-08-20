@@ -64,9 +64,9 @@
         <p class="muted">Automation Paused means zero automated device input; observation continues. Automation Enabled permits guarded actions and does not claim the game is currently Running.</p>
 
         <div class="button-grid">
-          <button class="action-button primary" type="button" data-control-action="pause">Pause indefinitely</button>
+          <button class="action-button primary" type="button" data-control-action="pause" data-minutes="30">Pause 30 min</button>
           <button class="action-button" type="button" data-control-action="pause" data-minutes="15">Pause 15 min</button>
-          <button class="action-button" type="button" data-control-action="pause" data-minutes="30">Pause 30 min</button>
+          <button class="action-button" type="button" data-control-action="pause">Pause indefinitely</button>
           <button class="action-button success" type="button" data-control-action="enable">Enable automation</button>
         </div>
 
@@ -123,12 +123,12 @@
           <div>
             <select id="modeSelect">
               <option value="NEXT_BATTLE">Continue automatically</option>
-              <option value="WAIT">Wait</option>
-              <option value="HOME">Return to / stay Home</option>
+              <option value="WAIT">Wait up to 30 min</option>
+              <option value="HOME">Return Home up to 30 min</option>
             </select>
             <button id="applyModeButton" type="button">Set policy</button>
           </div>
-          <p class="fine-print">This is a future terminal policy, not an immediate battle action.</p>
+          <p class="fine-print">Wait/Home are one-shot holds. After 30 idle minutes, automation starts Farm T19 Ad Assist.</p>
           <p id="terminalPolicyStatus" class="fine-print">Future terminal policy status is unavailable.</p>
         </div>
 

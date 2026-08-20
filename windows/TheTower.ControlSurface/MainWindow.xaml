@@ -361,8 +361,8 @@
                       <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <Button x:Name="PauseButton"
-                            Content="Automation Paused"
-                            Tag="pause"
+                            Content="Pause 30 min"
+                            Tag="pause:30"
                             Click="Control_Click" />
                     <Button Grid.Column="1"
                             x:Name="ResumeButton"
@@ -377,7 +377,7 @@
                               Margin="4">
                       <UniformGrid Columns="2">
                         <Button x:Name="Pause15Button" Content="15 min" Tag="pause:15" Click="Control_Click" />
-                        <Button x:Name="Pause30Button" Content="30 min" Tag="pause:30" Click="Control_Click" />
+                        <Button x:Name="Pause30Button" Content="Indefinite" Tag="pause" Click="Control_Click" />
                       </UniformGrid>
                     </Expander>
                   </Grid>
@@ -615,11 +615,11 @@
                                 Tag="NEXT_BATTLE"
                                 ToolTip="Future terminal policy; this is not an immediate battle action."
                                 Click="Mode_Click" />
-                        <Button x:Name="WaitModeButton" Content="Wait" Tag="WAIT" Click="Mode_Click" />
+                        <Button x:Name="WaitModeButton" Content="Wait 30 min" Tag="WAIT" Click="Mode_Click" />
                         <Button x:Name="HomeModeButton"
-                                Content="Return / stay Home"
+                                Content="Home 30 min"
                                 Tag="HOME"
-                                ToolTip="Return Home after Game Over and do not automatically start or resume a battle."
+                                ToolTip="Return Home after Game Over, hold for up to 30 minutes, then start Farm T19 Ad Assist."
                                 Click="Mode_Click" />
                       </UniformGrid>
                       <TextBlock x:Name="TerminalPolicyText"

@@ -1054,6 +1054,15 @@ public sealed class BetterControlTerminalPolicyStatus
     [JsonPropertyName("reason")]
     public string Reason { get; set; } = "";
 
+    [JsonPropertyName("timeout_seconds")]
+    public int TimeoutSeconds { get; set; }
+
+    [JsonPropertyName("timeout_strategy")]
+    public string TimeoutStrategy { get; set; } = "";
+
+    [JsonPropertyName("remaining_seconds")]
+    public int? RemainingSeconds { get; set; }
+
     [JsonPropertyName("acknowledgement")]
     public DirectiveAcknowledgement? Acknowledgement { get; set; }
 }

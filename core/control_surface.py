@@ -106,7 +106,7 @@ DEFAULT_STALE_AFTER_SECONDS = 180
 EMULATOR_DEGRADATION_CACHE_SECONDS = 60.0
 # Advance this when a newer Windows client must reload the resident service,
 # and advance that client's MinimumServerRevision in the same change.
-CONTROL_SURFACE_REVISION = 48
+CONTROL_SURFACE_REVISION = 49
 CONTROL_SURFACE_CAPABILITIES = (
     "active_battle_screen_metrics_v1",
     "active_battle_strategy_adoption",
@@ -114,6 +114,7 @@ CONTROL_SURFACE_CAPABILITIES = (
     "advisory_preflight_decisions",
     "better_control_model_v1",
     "better_control_model_v2",
+    "bounded_idle_timeout_v1",
     "completed_battle_discard",
     "confirmed_local_mapping_status_v2",
     "current_battle_perks_v1",
@@ -6810,14 +6811,37 @@ class ControlSurfaceService:
                     isinstance(mode_ack, Mapping)
                     and mode_ack.get("acknowledges_current") is True
                 ),
-                "meaning": "future terminal policy; never an immediate battle action",
+                "timeout_seconds": control.get("idle_timeout_seconds"),
+                "timeout_strategy": (
+                    control["terminal_idle_timeout"].get("strategy")
+                    if isinstance(
+                        control.get("terminal_idle_timeout"),
+                        Mapping,
+                    )
+                    else control.get("idle_timeout_strategy")
+                ),
+                "hold": (
+                    dict(control["terminal_idle_timeout"])
+                    if isinstance(
+                        control.get("terminal_idle_timeout"),
+                        Mapping,
+                    )
+                    else None
+                ),
+                "remaining_seconds": control.get(
+                    "terminal_idle_remaining_seconds"
+                ),
+                "meaning": (
+                    "future terminal policy; Wait/Home hold only the reached "
+                    "boundary until their bounded idle timeout"
+                ),
             },
             "home_behavior": {
                 "meaning": (
                     "Home observation does not change automation action authority. "
                     "Starting or resuming requires a matching explicit battle "
-                    "intent; the only automatic Home start is an exact, "
-                    "unconsumed continuation from a completed terminal route."
+                    "intent, an exact unconsumed terminal continuation, or an "
+                    "expired bounded idle hold converted to a Start workflow."
                 ),
                 "explicit_intent_required": bool(
                     runtime_lifecycle.get("explicit_home_intent_required")
