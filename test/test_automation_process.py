@@ -1621,7 +1621,7 @@ def test_control_surface_live_same_port_host_handoff_requires_pause_ack(tmp_path
         "emulator_location": _emulator_location(),
     }
 
-    with pytest.raises(ControlSurfaceRequestError, match="Indefinitely pause"):
+    with pytest.raises(ControlSurfaceRequestError, match="active Pause"):
         service.apply_process_action(request)
 
     service.apply_control({"action": "pause"})
@@ -1655,15 +1655,51 @@ def test_control_surface_rejects_mismatched_emulator_host_port(tmp_path):
         )
 
 
-def test_control_surface_rejects_live_handoff_under_timed_pause(tmp_path):
+def test_control_surface_allows_live_handoff_under_acknowledged_timed_pause(
+    tmp_path,
+):
     manager = FakeManager(active=True)
     service = _service(tmp_path, manager)
     service.apply_control({"action": "pause", "minutes": 15})
+    control = service.control_store.read()
+    lock_path = _write_running_runtime_evidence(
+        tmp_path,
+        pid=manager.pid,
+        control=control,
+    )
 
-    with pytest.raises(ControlSurfaceRequestError, match="Indefinitely pause"):
-        service.apply_process_action(
+    with lock_path.open("r", encoding="utf-8") as lock_handle:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        response = service.apply_process_action(
             {"action": "set_adb_port", "adb_port": 5575}
         )
+
+    assert manager.calls == ["persist_adb_port:5575"]
+    assert response["request"]["adb_port"] == 5575
+
+
+def test_control_surface_rejects_live_handoff_under_expired_timed_pause(
+    tmp_path,
+):
+    manager = FakeManager(active=True)
+    service = _service(tmp_path, manager)
+    control = service.control_store.set_state(
+        "PAUSED",
+        resume_at=time.time() - 1,
+        source="test",
+    )
+    lock_path = _write_running_runtime_evidence(
+        tmp_path,
+        pid=manager.pid,
+        control=control,
+    )
+
+    with lock_path.open("r", encoding="utf-8") as lock_handle:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with pytest.raises(ControlSurfaceRequestError, match="active Pause"):
+            service.apply_process_action(
+                {"action": "set_adb_port", "adb_port": 5575}
+            )
 
     assert manager.calls == []
 

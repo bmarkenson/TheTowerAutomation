@@ -1608,7 +1608,7 @@ public partial class MainWindow : Window
         if (_adbProcessActive && !_adbPausedAndAcknowledged)
         {
             ShowError(new InvalidOperationException(
-                "Indefinitely pause automation and wait for acknowledgement "
+                "Pause automation and wait for acknowledgement "
                 + "before selecting a Windows emulator host."));
             return;
         }
@@ -1709,7 +1709,7 @@ public partial class MainWindow : Window
             : !tunnelReady
                 ? "Start this PC's ADB reverse forward first."
                 : !runtimeReady
-                    ? "Indefinitely pause automation and wait for acknowledgement first."
+                    ? "Pause automation and wait for acknowledgement first."
                     : !compatible
                         ? "The Linux API must support emulator-host selection."
                         : "Revalidate this PC's forwarded emulator, even when the Linux port is unchanged, and record its host identity for CPH attribution.";
@@ -2673,7 +2673,7 @@ public partial class MainWindow : Window
         else if (_adbProcessActive && !_adbPausedAndAcknowledged)
         {
             AdbDraftStateText.Text =
-                "Draft retained locally; indefinitely Pause and wait for runtime acknowledgement before applying it.";
+                "Draft retained locally; Pause and wait for runtime acknowledgement before applying it.";
         }
         else
         {
@@ -3373,13 +3373,10 @@ public partial class MainWindow : Window
             processActive);
         StartAutomationButton.ToolTip = startBlocker;
         CompleteStopButton.IsEnabled = lifecycleAvailable && service?.Active == true;
-        var pausedAndAcknowledged = processActive
-            && string.Equals(
-                status.Control.State,
-                "PAUSED",
-                StringComparison.OrdinalIgnoreCase)
-            && status.Control.RemainingSeconds is null
-            && status.Acknowledgements.State?.AcknowledgesCurrent == true;
+        var pausedAndAcknowledged =
+            ControlSurfaceCompatibility.IsActivePauseAcknowledged(
+                status,
+                processActive);
         _startupGateContext = status.Control.StartupGateContext;
         _startupGateWaivers = status.Control.StartupGateWaivers;
         var canConfigureRun = !processActive
@@ -3498,7 +3495,7 @@ public partial class MainWindow : Window
             ? "Applying a valid draft changes only the configured target for the next managed start."
             : pausedAndAcknowledged
                 ? "A valid draft may hand off the live runtime in place; it remains Paused and does not rerun startup gates."
-                : "Indefinitely pause automation and wait for its acknowledgement before switching the live ADB port.";
+                : "Pause automation and wait for its acknowledgement before switching the live ADB port.";
         if (_adbPortDraftDirty
             && TryParsePort(AdbPortBox.Text, out var currentDraft)
             && _configuredAdbPort == currentDraft)

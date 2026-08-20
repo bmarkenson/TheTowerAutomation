@@ -4245,7 +4245,7 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert "When this battle ends" in html
     assert 'id="terminalPolicyStatus"' in html
     assert "RetryModeButton" not in native_xaml
-    assert "MinimumServerRevision = 49" in native_compatibility
+    assert "MinimumServerRevision = 50" in native_compatibility
     assert '"bounded_idle_timeout_v1"' in native_compatibility
     assert "bounded_idle_timeout_v1" in CONTROL_SURFACE_CAPABILITIES
     assert '"active_battle_screen_metrics_v1"' in native_compatibility

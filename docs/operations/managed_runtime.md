@@ -288,17 +288,18 @@ authority. Reopening `saved`, `cancelled`, `unavailable`, `interrupted`, or
 
 ## Switch the live ADB target
 
-1. Select indefinite Pause and wait for acknowledgement; timed Pause is not
-   accepted.
+1. Select Pause and wait for acknowledgement. Either an unexpired timed Pause
+   or an indefinite Pause is accepted; use indefinite when the move may outlast
+   the displayed countdown.
 2. Move the emulator, enter the new exact localhost port, and select Switch.
 3. Require the new target lock, `device` transport, supported fresh frame, and
    runtime handoff acknowledgement before the old lock is released.
 4. Verify the fresh screen and select **Automation Enabled** only when
    appropriate.
 
-A failed handoff remains Paused and retains the old runtime target while the
-control service may continue bounded registration retries for the saved next-
-start target.
+A failed handoff retains the old runtime target and current Pause directive
+while the control service may continue bounded registration retries for the
+saved next-start target. An existing timed Pause may still expire normally.
 
 ### Move the emulator between Windows PCs
 
@@ -354,11 +355,11 @@ textually unchanged.
 For the cleanest performance attribution, move at a natural completed-battle or
 Home boundary before the next battle begins. Select **Wait 30 min** or
 **Home 30 min** as the battle-end policy in advance when appropriate, then
-establish the required acknowledged indefinite Pause before the hold expires;
-never Surrender an operator-owned battle merely to manufacture a handoff
-boundary. A mid-battle move is supported when it is operationally necessary,
-but that completed battle will intentionally be classified as mixed-host and
-excluded from host-specific CPH baselines.
+establish the required acknowledged Pause and complete the move before a timed
+Pause expires; never Surrender an operator-owned battle merely to manufacture
+a handoff boundary. A mid-battle move is supported when it is operationally
+necessary, but that completed battle will intentionally be classified as
+mixed-host and excluded from host-specific CPH baselines.
 
 #### One-time preparation on each Windows PC
 
@@ -389,10 +390,11 @@ Perform these steps while the source PC's API connection and current emulator
 path still work:
 
 1. Open the source PC's Control Surface.
-2. Select indefinite **Automation Paused**. Do not use a timed pause.
-3. Wait until the runtime—not merely the button—reports the current Pause
-   request as **acknowledged**. The action-authority display must say
-   Automation Paused.
+2. Select **Pause**. The default 30-minute Pause is eligible; choose the
+   explicit indefinite Pause when the move may outlast the displayed countdown.
+3. Wait until the runtime—not merely the button—reports that exact current
+   Pause request as **acknowledged**. The action-authority display must say
+   Automation Paused, and a timed Pause must still have time remaining.
 4. If a battle is still active, complete the game's supported cloud-save
    synchronization on the source PC and wait for its success indication. Do
    not treat Pause acknowledgement, a recent screenshot, or an automation save
@@ -452,8 +454,8 @@ client never kills or adopts another client's tunnel.
 
 #### Phase 3 — Explicitly select and validate the destination host
 
-1. Reconfirm that indefinite Pause is still acknowledged. If automation is
-   running and the acknowledgement is absent, request Pause again and wait.
+1. Reconfirm that Pause is still active and acknowledged. If a timed Pause has
+   expired or the acknowledgement is absent, request Pause again and wait.
 2. In the destination PC's **System > Connections** ADB reverse-forward panel,
    select **Use this PC's emulator**.
 3. Wait for all of the following:
@@ -540,7 +542,7 @@ these conditions:
 | Requirement | Recovery |
 | --- | --- |
 | This client's ADB reverse forward has an **Active** endpoint | Start or repair the ADB forward; Windows-listener detection alone is insufficient. |
-| A live automation process is indefinitely Paused and that exact request is acknowledged | Select indefinite Pause and wait for runtime acknowledgement. A timed Pause is ineligible. |
+| A live automation process has an active Pause and that exact request is acknowledged | Select Pause and wait for runtime acknowledgement. An unexpired timed Pause or indefinite Pause is eligible. |
 | The managed ADB lifecycle is available | Restore the compatible Linux API/service and refresh status. |
 | The server supports emulator-host selection | Update/restart the Linux API and use the matching complete Windows package. |
 | No selection request is already in flight | Wait for the current request to finish and review its result. |
@@ -591,7 +593,8 @@ eventual exit.
 
 Use this only after understanding the detailed procedure above:
 
-1. Source: request indefinite Pause and wait for **acknowledged**.
+1. Source: request Pause and wait for **acknowledged**; if it is timed, finish
+   the move before its countdown expires.
 2. Source: **System > Connections > Stop ADB forward**; wait for Stopped.
 3. Source: close BlueStacks/GUI only after the forward is released.
 4. Destination: start BlueStacks and The Tower; confirm the Windows listener.
