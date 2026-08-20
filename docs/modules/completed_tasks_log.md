@@ -39,6 +39,55 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-20 durable Cell balance tracking
+
+- Exact implementation candidate `f540853` observes the version-1101 `cells`
+  save field through the shared runtime-observation contract and records
+  target-separated samples in a transactional SQLite store. Same-target
+  reconnects retain continuity, a backward save revision opens a new epoch
+  instead of reporting cloud rollback as spend, and retention is bounded to 90
+  days or 30,000 samples.
+- The API, browser dashboard, and native Control Surface expose current Cells,
+  comparable sample count, and net trend using a 24-hour baseline when one is
+  available. Compatibility revision 52 advertises
+  `cell_balance_tracking_v1`. An optional `THETOWER_CELL_BUFFER` produces
+  crossing and recovery warnings; no buffer was selected for production and
+  the observation capability has neither UI action authority nor automatic
+  Lab Speedup reduction. The guarded reducer prerequisites remain active
+  backlog work.
+- Focused merged coverage passed 1,054 Python tests and all 231 portable .NET
+  tests. The Release WindowsDesktop cross-build completed with zero errors and
+  only the established read-only NuGet vulnerability-cache `NU1900` warnings.
+  The complete checkpoint for exact candidate `f540853` passed compilation,
+  state-definition validation, clickmap integrity with zero errors and the
+  established 44 orphan notices, and all 3,121 tests in 628.37 seconds.
+- Production advanced from `207761c` to `f540853` behind rollback tag
+  `production-before-20260820T174150Z-207761c`. The guarded stop retained
+  active-battle handoff `14548d1e331a4f709763336059e5c139`; replacement PID
+  `1458158` reattached the same battle on `localhost:5565`, restored exact
+  acknowledged `RUNNING` action authority, and reached wave 2985. Fresh live
+  observation reported 13,807,202 Cells across three flat samples with no
+  configured buffer.
+- The complete native package was published from exact production source
+  `f540853` at 10:47 PDT. Current `TheTower.ControlSurface.exe` is 72,535,058
+  bytes with SHA-256
+  `0d199b6ed7413c09c7f3785ba721e6c98ef2ed00209fb8e7a4e38b5f3e7fa536`;
+  current `TheTower.TunnelHost.exe` is 35,172,142 bytes with SHA-256
+  `327527a1e1a7f63064379af44851fffd129b26ce7eb0a2baeca0631aa8ed0d83`.
+  Retained slot 1 is the immediately preceding package: its 72,527,802-byte
+  Control Surface has SHA-256
+  `5ce7c065ea1163f9d92e664e379206e260af5e3b4f3eab501ed36c73dadb4637`
+  and its 35,172,105-byte Tunnel Host has SHA-256
+  `23b455368a50438a13c8949aa5ee1c7d34353da5d8868d0d5caaba88ca5ef88c`;
+  no tracked receipt proves that slot's exact source commit. Retained slot 2 is
+  the package published from source receipt `99e809f`: its 72,526,210-byte
+  Control Surface has SHA-256
+  `b353c2f90de00d7055d653781690b956aa8dc4237c32eea613ee0055f6345f55`
+  and its 35,172,109-byte Tunnel Host has SHA-256
+  `aa9c763daab9061f5801c221e2bd1e8a2011635a6df97959552d7af783584b3d`.
+  Cross-publication does not establish Windows WPF runtime behavior; native
+  Windows lifecycle validation remains pending.
+
 ### 2026-08-20 Paused terminal observation and guarded save refresh
 
 - Exact implementation candidate `0a5365f` keeps capture, detection,
