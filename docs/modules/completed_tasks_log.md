@@ -39,6 +39,32 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-19 Bounded idle timeout and fallback battle
+
+- Exact implementation candidate `a68edb2` makes ordinary idle intent bounded.
+  The primary Pause is 30 minutes while explicit indefinite Pause remains
+  available; expiry continues an active battle, routes a terminal screen Home,
+  or starts the configured fallback from verified Home New Battle evidence.
+- Wait and Return/Stay Home now arm durable 30-minute, exact-request holds when
+  their terminal boundary is reached. Expiry consumes the one-shot policy,
+  resets the future disposition to Continue, and requests the ordinary guarded
+  Start Battle workflow with `farm_t19_ad_assist`. Explicit state, Strategy,
+  manual-control, or workflow intervention also consumes the hold, while a new
+  terminal-policy selection replaces it. Safety and manual-control holds remain
+  indefinite.
+- Browser and native revision 49 clients expose the bounded Pause and terminal
+  choices, retain explicit indefinite Pause, and show the active countdown and
+  fallback Strategy. The 215 portable native tests and JavaScript syntax check
+  passed, and the Release `win-x64` Control Surface and Tunnel Host cross-build
+  completed with zero warnings and zero errors. This is not Windows WPF runtime
+  validation.
+- The runtime/shared-control candidate-gate row required the complete
+  checkpoint. It compiled all Python, validated state definitions and clickmap
+  integrity with zero errors and the established 44 orphan notices, and passed
+  all 3,064 repository tests in 629.49 seconds using development-environment
+  fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+
 ### 2026-08-19 Expected same-battle emulator-handoff wave rollback
 
 - Exact implementation candidate `42aebe7` accepts a lower destination
