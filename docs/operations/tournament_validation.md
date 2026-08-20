@@ -28,6 +28,15 @@ When finished, reinspect the owner, target, screen, control, and action log.
 Restore the previous state only under the agent-owned Pause cleanup rules; do
 not blindly Resume a pre-existing Pause or changed battle.
 
+If the Tournament naturally finishes while Automation remains Paused, normal
+capture/detection and structured result persistence still run without opening
+More Stats or dismissing Tournament Results. The default Pause may use one
+guarded Android Home/restore serialization only when the first stable terminal
+save still reports an active round. Select strict Pause to prohibit even that
+paired lifecycle input. A valid summary is retained immediately and the same
+record can be enriched after Enable when save-backed or UI details become
+available.
+
 To continue passive observation after a validated check, the managed
 Tournament profile may be selected before attaching without restarting the
 battle:

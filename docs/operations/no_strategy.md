@@ -10,8 +10,11 @@ Select Strategy `none`, then treat process lifecycle, action authority, and
 battle intent separately. **Start Automation** launches Paused. From verified
 Home `NEW_BATTLE`, select **Start Battle** and then explicitly **Automation
 Enabled**; the normal new-run boundary still owns its gates even though the
-Strategy itself declares none. Pause before manual navigation. Passive capture
-may continue while Paused, but every automated input remains blocked.
+Strategy itself declares none. Pause before manual navigation. Passive capture,
+save analysis, and terminal record persistence may continue while Paused, but
+ordinary automated game interaction remains blocked. The default one-shot
+terminal-save refresh and strict-Pause option follow the global Pause contract;
+neither authorizes No Strategy UI or route input.
 
 For manual play, first use **Take Manual Control** and wait for its
 acknowledged indefinite Pause. **Return Control** is not an alias for Enable:

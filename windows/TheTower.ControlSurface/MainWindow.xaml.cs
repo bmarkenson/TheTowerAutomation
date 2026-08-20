@@ -1815,7 +1815,24 @@ public partial class MainWindow : Window
             {
                 var minutes = int.Parse(tag.Split(':')[1], CultureInfo.InvariantCulture);
                 response = await _api.PostControlAsync(
-                    new { action = "pause", minutes },
+                    new
+                    {
+                        action = "pause",
+                        minutes,
+                        allow_terminal_save_refresh =
+                            AllowTerminalSaveRefreshCheckBox.IsChecked != false,
+                    },
+                    CancellationToken.None);
+            }
+            else if (string.Equals(tag, "pause", StringComparison.Ordinal))
+            {
+                response = await _api.PostControlAsync(
+                    new
+                    {
+                        action = "pause",
+                        allow_terminal_save_refresh =
+                            AllowTerminalSaveRefreshCheckBox.IsChecked != false,
+                    },
                     CancellationToken.None);
             }
             else
@@ -1832,6 +1849,8 @@ public partial class MainWindow : Window
                                 (ManualSurrenderCollectionBox.SelectedItem as ComboBoxItem)
                                     ?.Tag?.ToString()
                                 ?? "minimal",
+                            allow_terminal_save_refresh =
+                                AllowTerminalSaveRefreshCheckBox.IsChecked != false,
                         },
                         CancellationToken.None)
                     : await _api.PostControlAsync(
@@ -3121,6 +3140,15 @@ public partial class MainWindow : Window
         DirectiveRequestText.Text =
             $"Requested: {FormatAutomationState(status.Control)}";
         ModeText.Text = FormatExecutionMode(status.Control.Mode);
+        if (string.Equals(
+                status.Control.State,
+                "PAUSED",
+                StringComparison.OrdinalIgnoreCase)
+            && status.Control.PauseTerminalSaveRefresh is not null)
+        {
+            AllowTerminalSaveRefreshCheckBox.IsChecked =
+                status.Control.PauseTerminalSaveRefresh.Allowed;
+        }
         RenderConfirmedLocalMappings(status.ConfirmedLocalMappings);
         var strategyGate = status.StrategyActionGate;
         var strategyGateVisible = strategyGate is
@@ -4201,6 +4229,7 @@ public partial class MainWindow : Window
         PauseButton.IsEnabled = pause.Available;
         Pause15Button.IsEnabled = pause.Available;
         Pause30Button.IsEnabled = pause.Available;
+        AllowTerminalSaveRefreshCheckBox.IsEnabled = pause.Available;
         PauseButton.ToolTip = pause.Reason;
         Pause15Button.ToolTip = pause.Reason;
         Pause30Button.ToolTip = pause.Reason;
@@ -5326,13 +5355,20 @@ public partial class MainWindow : Window
     private static string FormatAutomationState(ControlStatus control)
     {
         var state = FormatStatusToken(control.State);
-        return string.Equals(
+        if (string.Equals(
                 control.State,
                 "PAUSED",
-                StringComparison.OrdinalIgnoreCase)
-            && control.RemainingSeconds is not null
-                ? $"{state} · {FormatAge(control.RemainingSeconds)} left"
-                : state;
+                StringComparison.OrdinalIgnoreCase))
+        {
+            state += control.PauseTerminalSaveRefresh?.Allowed == true
+                ? " · terminal save refresh allowed"
+                : " · strict, no lifecycle input";
+            if (control.RemainingSeconds is not null)
+            {
+                state += $" · {FormatAge(control.RemainingSeconds)} left";
+            }
+        }
+        return state;
     }
 
     private static string FormatActionAuthority(
@@ -5352,10 +5388,17 @@ public partial class MainWindow : Window
             "unavailable" => "Authority Unavailable",
             _ => "Authority Unknown",
         };
-        return model.ActionAuthority.Effective == "paused"
-            && control.RemainingSeconds is not null
-                ? $"{label} · {FormatAge(control.RemainingSeconds)} left"
-                : label;
+        if (model.ActionAuthority.Effective == "paused")
+        {
+            label += control.PauseTerminalSaveRefresh?.Allowed == true
+                ? " · terminal save refresh allowed"
+                : " · strict, no lifecycle input";
+            if (control.RemainingSeconds is not null)
+            {
+                label += $" · {FormatAge(control.RemainingSeconds)} left";
+            }
+        }
+        return label;
     }
 
     private static string FormatExecutionMode(string? value) =>

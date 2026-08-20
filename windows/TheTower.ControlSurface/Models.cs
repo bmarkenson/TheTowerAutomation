@@ -1453,6 +1453,9 @@ public sealed class ControlStatus
     [JsonPropertyName("remaining_seconds")]
     public int? RemainingSeconds { get; set; }
 
+    [JsonPropertyName("pause_terminal_save_refresh")]
+    public PauseTerminalSaveRefreshStatus? PauseTerminalSaveRefresh { get; set; }
+
     [JsonPropertyName("adb_port")]
     public int? AdbPort { get; set; }
 
@@ -1494,6 +1497,27 @@ public sealed class ControlStatus
 
     [JsonPropertyName("error")]
     public string? Error { get; set; }
+}
+
+public sealed class PauseTerminalSaveRefreshStatus
+{
+    [JsonPropertyName("allowed")]
+    public bool Allowed { get; set; }
+
+    [JsonPropertyName("attempts")]
+    public List<PauseTerminalSaveRefreshAttemptStatus> Attempts { get; set; } = [];
+}
+
+public sealed class PauseTerminalSaveRefreshAttemptStatus
+{
+    [JsonPropertyName("terminal_state")]
+    public string TerminalState { get; set; } = "";
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "";
+
+    [JsonPropertyName("reason")]
+    public string? Reason { get; set; }
 }
 
 public sealed class EmulatorLocationStatus

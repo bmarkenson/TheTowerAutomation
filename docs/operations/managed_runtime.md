@@ -189,8 +189,12 @@ hold; the runtime retains its exact process-local claim and retries reporting.
 ## Take and return manual control
 
 **Take Manual Control** first requests and waits for an acknowledged indefinite
-Pause. Observation may continue, but automated device input is zero. Choose how
-a later manual Surrender should be handled at that boundary:
+Pause. Observation may continue and ordinary automated game interaction is
+blocked. Under the default Pause policy, a later proven Game Over may still use
+the one paired terminal-save Home/restore refresh; clear **Allow terminal save
+refresh** when taking control if even that serialization input must be
+prohibited. Choose how a later manual Surrender should be handled at that
+boundary:
 
 - **Exclude manual Surrender stats** (default) detects the terminal from the
   bound natural save, writes a minimal nonrepresentative/excluded record, and

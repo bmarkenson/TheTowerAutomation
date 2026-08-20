@@ -16,6 +16,7 @@ from handlers.game_over_handler import (
     _resolve_game_over_perks,
     _save_battle_stats_record,
     _wait_for_game_over_direction,
+    capture_game_over_observation,
     handle_game_over,
 )
 from core.run_state import AUTOMATION, ExecMode, RunState
@@ -1081,6 +1082,80 @@ def test_player_save_success_never_opens_more_stats_and_keeps_perk_order():
     assert [call.args[0] for call in tap.call_args_list] == [
         "buttons.home:game_over"
     ]
+
+
+def test_paused_game_over_observation_uses_save_without_any_terminal_input():
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    record = {
+        "quality": {"valid": True, "retain_source_images": False},
+        "more_stats": {"quality": {"row_count": 144}},
+        "game_stats": {
+            "fields": {"killed_by": {"value": "Boss", "raw": "Boss"}}
+        },
+    }
+    with (
+        patch(
+            "handlers.game_over_handler.capture_adb_screenshot",
+            return_value=frame,
+        ),
+        patch(
+            "handlers.game_over_handler.build_battle_record_from_player_save",
+            return_value=record,
+        ),
+        patch(
+            "handlers.game_over_handler._persist_battle_stats_record",
+            return_value=True,
+        ) as persist,
+        patch("handlers.game_over_handler.attach_battle_perks"),
+        patch("handlers.game_over_handler.tap_if_visible") as tap,
+        patch("handlers.game_over_handler.scroll_to_edge") as scroll,
+    ):
+        result = capture_game_over_observation(
+            battle_context={
+                "strategy": "farm_t19",
+                "terminal_save_report": _complete_terminal_save_report(),
+            }
+        )
+
+    assert result.route_completed is False
+    assert result.route == "retained"
+    assert result.record is record
+    assert result.stats_status == "saved"
+    persist.assert_called_once()
+    tap.assert_not_called()
+    scroll.assert_not_called()
+
+
+def test_paused_game_over_observation_defers_incomplete_save_without_input():
+    frame = np.zeros((1920, 1080, 3), dtype=np.uint8)
+    with (
+        patch(
+            "handlers.game_over_handler.capture_adb_screenshot",
+            return_value=frame,
+        ),
+        patch(
+            "handlers.game_over_handler.build_battle_record_from_player_save"
+        ) as build,
+        patch("handlers.game_over_handler._persist_battle_stats_record") as persist,
+        patch("handlers.game_over_handler.tap_if_visible") as tap,
+        patch("handlers.game_over_handler.scroll_to_edge") as scroll,
+    ):
+        result = capture_game_over_observation(
+            battle_context={
+                "terminal_save_report": {
+                    "status": "unavailable",
+                    "reason": "save_still_active",
+                }
+            }
+        )
+
+    assert result.route_completed is False
+    assert result.record is None
+    assert result.stats_status == "unavailable"
+    build.assert_not_called()
+    persist.assert_not_called()
+    tap.assert_not_called()
+    scroll.assert_not_called()
 
 
 def test_terminal_mapping_observation_never_uses_raw_ocr_text():

@@ -403,6 +403,14 @@ def main(argv=None):
         help="Optional positive duration for the pause command",
     )
     p.add_argument(
+        "--strict-pause",
+        action="store_true",
+        help=(
+            "Disable the guarded terminal save refresh for pause or "
+            "take-manual-control"
+        ),
+    )
+    p.add_argument(
         "--base",
         default=None,
         metavar="ID@REVISION",
@@ -427,12 +435,25 @@ def main(argv=None):
         if args.minutes is not None:
             if not math.isfinite(args.minutes) or args.minutes <= 0:
                 p.error("--minutes must be a positive number")
-            _apply_better_control(ctrl, "pause", minutes=args.minutes)
+            _apply_better_control(
+                ctrl,
+                "pause",
+                minutes=args.minutes,
+                allow_terminal_save_refresh=not args.strict_pause,
+            )
         else:
-            _apply_better_control(ctrl, "pause")
+            _apply_better_control(
+                ctrl,
+                "pause",
+                allow_terminal_save_refresh=not args.strict_pause,
+            )
         return 0
     if args.minutes is not None:
         p.error("--minutes is only valid with the pause command")
+    if args.strict_pause and cmd[0] != "take-manual-control":
+        p.error(
+            "--strict-pause is only valid with pause or take-manual-control"
+        )
     if args.base is not None and cmd[0] != "capture-setup":
         p.error("--base is only valid with capture-setup")
     if args.review_fingerprint is not None and cmd[0] != "capture-setup":
@@ -461,6 +482,7 @@ def main(argv=None):
             ctrl,
             "take_manual_control",
             manual_surrender_collection=collection,
+            allow_terminal_save_refresh=not args.strict_pause,
         )
         return 0
     if cmd[0] == "return-control" and len(cmd) == 1:

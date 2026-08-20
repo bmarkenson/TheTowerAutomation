@@ -527,6 +527,106 @@ class AutomationSupervisor:
         }
 
     @property
+    def pause_terminal_save_refresh(self) -> Optional[Dict[str, object]]:
+        """Return the current Pause episode's normalized refresh policy."""
+
+        try:
+            status = self._control_store.status()
+        except ControlDirectiveError:
+            return None
+        policy = status.get("pause_terminal_save_refresh")
+        return deepcopy(dict(policy)) if isinstance(policy, Mapping) else None
+
+    def claim_paused_terminal_save_refresh(
+        self,
+        *,
+        terminal_state: str,
+        boundary_fingerprint: str,
+    ) -> Optional[Dict[str, object]]:
+        """Claim one exact terminal refresh under the applied Pause request."""
+
+        request_id = str(self._last_state_directive_revision or "").strip()
+        if self.control_state != "PAUSED" or not request_id:
+            return None
+        try:
+            claim = self._control_store.claim_paused_terminal_save_refresh(
+                state_request_id=request_id,
+                terminal_state=terminal_state,
+                boundary_fingerprint=boundary_fingerprint,
+            )
+        except (ControlDirectiveError, ValueError) as exc:
+            log(
+                "[TERMINAL_SAVE_REFRESH] Could not claim the paused terminal "
+                f"refresh boundary: {exc}",
+                "WARN",
+            )
+            return None
+        return dict(claim) if isinstance(claim, Mapping) else None
+
+    def paused_terminal_save_refresh_claim_current(
+        self,
+        claim: Mapping[str, object],
+    ) -> bool:
+        """Revalidate one claimed boundary against current durable Pause."""
+
+        claim_id = str(claim.get("claim_id") or "").strip()
+        boundary = str(
+            claim.get("boundary_fingerprint") or ""
+        ).strip().lower()
+        terminal = str(claim.get("terminal_state") or "").strip().upper()
+        request_id = str(self._last_state_directive_revision or "").strip()
+        if (
+            self.control_state != "PAUSED"
+            or not request_id
+            or not claim_id
+            or not boundary
+            or terminal not in {"GAME_OVER", "TOURNAMENT_RESULTS"}
+        ):
+            return False
+        try:
+            status = self._control_store.status()
+        except ControlDirectiveError:
+            return False
+        policy = status.get("pause_terminal_save_refresh")
+        return bool(
+            status.get("state") == "PAUSED"
+            and str(status.get("state_request_id") or "") == request_id
+            and isinstance(policy, Mapping)
+            and policy.get("allowed") is True
+            and any(
+                isinstance(attempt, Mapping)
+                and attempt.get("claim_id") == claim_id
+                and attempt.get("boundary_fingerprint") == boundary
+                and attempt.get("terminal_state") == terminal
+                and attempt.get("status") == "claimed"
+                for attempt in policy.get("attempts", ())
+            )
+        )
+
+    def complete_paused_terminal_save_refresh(
+        self,
+        claim_id: str,
+        *,
+        status: str,
+        reason: str,
+    ) -> bool:
+        """Record one terminal refresh disposition without changing Pause."""
+
+        try:
+            return self._control_store.complete_paused_terminal_save_refresh(
+                claim_id,
+                status=status,
+                reason=reason,
+            )
+        except (ControlDirectiveError, ValueError) as exc:
+            log(
+                "[TERMINAL_SAVE_REFRESH] Could not retain refresh outcome: "
+                f"{exc}",
+                "WARN",
+            )
+            return False
+
+    @property
     def unexpected_manual_yield_emergency(self) -> bool:
         """Return whether a failed durable yield is enforcing local Pause."""
 

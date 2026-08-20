@@ -111,7 +111,14 @@ function renderStatus(payload) {
   setText("directiveState", directive);
   byId("directiveState").className = `state-pill ${directive.toLowerCase()}`;
   let directiveDetail = control.updated_at ? `Updated ${formatDate(control.updated_at)}` : "No persisted update time";
-  if (directive === "PAUSED") directiveDetail = `Paused ${formatRemaining(control.remaining_seconds)}`;
+  if (directive === "PAUSED") {
+    const terminalRefresh = control.pause_terminal_save_refresh;
+    directiveDetail = `Paused ${formatRemaining(control.remaining_seconds)}`
+      + (terminalRefresh?.allowed === true
+        ? " · terminal save refresh allowed"
+        : " · strict, no lifecycle input");
+    byId("allowTerminalSaveRefresh").checked = terminalRefresh?.allowed === true;
+  }
   if (control.error) directiveDetail = control.error;
   setText("directiveDetail", directiveDetail);
   setText("currentMode", formatTerminalPolicy(control.mode));
@@ -843,6 +850,7 @@ function renderBetterControlModel(model, compatible, captureCompatible, controlE
       ? pause.reason || ""
       : "Linux API revision 30 with better_control_model_v2 is required.";
   });
+  byId("allowTerminalSaveRefresh").disabled = !compatible || pause.available !== true;
   for (const [id, action] of [
     ["startBattleButton", "start_battle"],
     ["attachBattleButton", "attach_battle"],
@@ -1843,6 +1851,9 @@ document.addEventListener("click", (event) => {
     const payload = { action };
     if (control.dataset.minutes) payload.minutes = Number(control.dataset.minutes);
     if (control.dataset.mode) payload.mode = control.dataset.mode;
+    if (action === "pause") {
+      payload.allow_terminal_save_refresh = byId("allowTerminalSaveRefresh").checked;
+    }
     const message = action === "pause"
       ? "Pause directive saved"
       : `${humanize(action)} directive saved`;
@@ -1862,7 +1873,14 @@ document.addEventListener("click", (event) => {
 byId("customPauseForm").addEventListener("submit", (event) => {
   event.preventDefault();
   const minutes = Number(byId("customPauseMinutes").value);
-  sendControl({ action: "pause", minutes }, `Paused for ${minutes} minutes`);
+  sendControl(
+    {
+      action: "pause",
+      minutes,
+      allow_terminal_save_refresh: byId("allowTerminalSaveRefresh").checked,
+    },
+    `Paused for ${minutes} minutes`,
+  );
 });
 
 byId("manualControlForm").addEventListener("submit", (event) => {
@@ -1876,6 +1894,7 @@ byId("manualControlForm").addEventListener("submit", (event) => {
     {
       action: "take_manual_control",
       manual_surrender_collection: selected.value,
+      allow_terminal_save_refresh: byId("allowTerminalSaveRefresh").checked,
     },
     `Manual Control requested; manual Surrender collection is ${humanize(selected.value)}`,
   );

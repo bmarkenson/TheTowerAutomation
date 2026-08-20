@@ -4001,7 +4001,6 @@ def test_control_requests_are_allowlisted_and_audited(tmp_path):
     service = _service(tmp_path)
     lock_handle = _fresh_runtime_lock(tmp_path, state="RUNNING")
     response = service.apply_control({"action": "pause", "minutes": 15})
-    lock_handle.close()
     assert response["request"] == {
         "accepted": True,
         "action": "pause",
@@ -4011,6 +4010,23 @@ def test_control_requests_are_allowlisted_and_audited(tmp_path):
     assert control["state"] == "PAUSED"
     assert control["updated_by"] == "control-surface"
     assert control["resume_at"] > datetime.now().timestamp()
+    assert control["pause_terminal_save_refresh"]["allowed"] is True
+
+    strict = service.apply_control(
+        {
+            "action": "pause",
+            "allow_terminal_save_refresh": False,
+        }
+    )
+    assert strict["control"]["pause_terminal_save_refresh"]["allowed"] is False
+    with pytest.raises(ControlSurfaceRequestError):
+        service.apply_control(
+            {
+                "action": "pause",
+                "allow_terminal_save_refresh": "false",
+            }
+        )
+    lock_handle.close()
     assert "[CONTROL_SURFACE] Requested PAUSED for 15 minutes" in (
         tmp_path / "logs" / "actions.log"
     ).read_text(encoding="utf-8")
@@ -4241,13 +4257,21 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert '<option value="NEXT_BATTLE">Continue automatically</option>' in html
     assert '<option value="HOME">Return Home up to 30 min</option>' in html
     assert 'data-control-action="pause" data-minutes="30">Pause 30 min' in html
+    assert 'id="allowTerminalSaveRefresh" type="checkbox" checked' in html
+    assert "allow_terminal_save_refresh" in script
+    assert (
+        'allow_terminal_save_refresh: byId("allowTerminalSaveRefresh").checked'
+        in script
+    )
     assert "then ${humanize(terminalPolicy.timeout_strategy" in script
     assert "When this battle ends" in html
     assert 'id="terminalPolicyStatus"' in html
     assert "RetryModeButton" not in native_xaml
-    assert "MinimumServerRevision = 49" in native_compatibility
+    assert "MinimumServerRevision = 50" in native_compatibility
     assert '"bounded_idle_timeout_v1"' in native_compatibility
     assert "bounded_idle_timeout_v1" in CONTROL_SURFACE_CAPABILITIES
+    assert "paused_terminal_save_refresh_v1" in CONTROL_SURFACE_CAPABILITIES
+    assert '"paused_terminal_save_refresh_v1"' in native_compatibility
     assert '"active_battle_screen_metrics_v1"' in native_compatibility
     assert "active_battle_screen_metrics_v1" in CONTROL_SURFACE_CAPABILITIES
     assert '"active_run_metrics_v1"' in native_compatibility

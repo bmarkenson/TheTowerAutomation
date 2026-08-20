@@ -23,6 +23,7 @@ from utils.logger import (
     get_activity_scope,
     log,
     log_action_intent,
+    log_input,
     log_result,
     new_operation_id,
     set_mission_log_path,
@@ -244,6 +245,7 @@ from automation.missions.yaml_mission import YamlMission
 from automation.strategies import get_strategy
 from handlers.game_over_handler import (
     GameOverHandlingOutcome,
+    capture_game_over_observation,
     handle_game_over,
     restore_game_stats_for_terminal_route,
 )
@@ -675,9 +677,17 @@ class App:
                 )
         self._blind_tapper_suspended = False
         self._tournament_results_captured = False
+        self._tournament_result_details_complete = False
         self._tournament_terminal_continuation_bound = False
         self._tournament_terminal_continuation_claim = None
         self._tournament_degradation_snapshot = None
+        self._tournament_degradation_snapshot_observed = False
+        self._tournament_degradation_prepared = False
+        self._paused_terminal_observations: dict[str, dict[str, Any]] = {}
+        self._paused_game_over_record: Optional[dict[str, Any]] = None
+        self._active_paused_terminal_save_refresh_claim: Optional[
+            dict[str, Any]
+        ] = None
         self._no_strategy_observer = NoStrategyRunObserver()
         self._no_strategy_observation_active = False
         self._no_strategy_attachment_boundary_id: Optional[str] = None
@@ -2569,6 +2579,296 @@ class App:
             )
         return context, typed_acquisition, terminal_save.get(
             "_mapping_observer"
+        )
+
+    @staticmethod
+    def _terminal_save_refresh_required(
+        context: Mapping[str, Any],
+        acquisition: Optional[PlayerSaveAcquisitionBundle],
+    ) -> bool:
+        """Return whether the stable terminal read still reflects an active run."""
+
+        if terminal_save_report_complete(context.get("terminal_save_report")):
+            return False
+        if not (
+            isinstance(acquisition, PlayerSaveAcquisitionBundle)
+            and acquisition.complete
+            and acquisition.snapshot is not None
+        ):
+            return False
+        runtime = getattr(acquisition.snapshot, "runtime_save", None)
+        return bool(getattr(runtime, "round_active", None) is True)
+
+    @staticmethod
+    def _paused_terminal_boundary_fingerprint(
+        terminal_state: str,
+        _frame: Frame,
+        evidence: Mapping[str, Any],
+        *,
+        terminal_identity: Optional[str] = None,
+    ) -> str:
+        """Identify one terminal boundary without persisting raw target/frame data."""
+
+        terminal = str(terminal_state or "").strip().upper()
+        identity = str(
+            terminal_identity
+            or evidence.get("active_round_identity_fingerprint")
+            or ""
+        ).strip().lower()
+        if len(identity) != 64 or any(
+            character not in "0123456789abcdef" for character in identity
+        ):
+            # Without an exact round identity, fail conservatively to one
+            # terminal-class claim for this target in the current Pause. A
+            # screenshot hash is not a safe boundary identity because animated
+            # terminal pixels could otherwise mint repeated lifecycle claims.
+            identity = hashlib.sha256(
+                f"unbound:{terminal}".encode("utf-8")
+            ).hexdigest()
+        payload = {
+            "schema_version": 1,
+            "terminal_state": terminal,
+            "terminal_identity": identity,
+            "target_binding": hashlib.sha256(
+                str(evidence.get("adb_target") or "").encode("utf-8")
+            ).hexdigest(),
+        }
+        return hashlib.sha256(
+            json.dumps(
+                payload,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest()
+
+    @staticmethod
+    def _terminal_source_frame_matches(
+        frame: object,
+        terminal_state: str,
+    ) -> bool:
+        """Verify restoration to the same terminal class without taking input."""
+
+        if not isinstance(frame, np.ndarray):
+            return False
+        try:
+            detection = detect_state_and_overlays(frame)
+        except Exception:
+            return False
+        return str(detection.get("state") or "").strip().upper() == str(
+            terminal_state or ""
+        ).strip().upper()
+
+    def _paused_terminal_battle_bundle(
+        self,
+        terminal_state: str,
+        frame: Frame,
+        *,
+        observed_run_configuration: Optional[Mapping[str, Any]] = None,
+    ) -> tuple[
+        dict[str, Any],
+        Optional[PlayerSaveAcquisitionBundle],
+        Optional[BoundPlayerSaveMappingObserver],
+        Optional[Frame],
+        str,
+    ]:
+        """Observe a terminal and, when needed, consume its one paused refresh."""
+
+        terminal = str(terminal_state or "").strip().upper()
+        context, acquisition, mapping_observer = self._terminal_battle_bundle(
+            terminal,
+            observed_run_configuration=observed_run_configuration,
+        )
+        if not self._terminal_save_refresh_required(context, acquisition):
+            return (
+                context,
+                acquisition,
+                mapping_observer,
+                frame,
+                "not_required",
+            )
+
+        evidence = self._current_control_workflow_evidence()
+        policy = getattr(
+            getattr(self, "_supervisor", None),
+            "pause_terminal_save_refresh",
+            None,
+        )
+        if not (
+            isinstance(evidence, Mapping)
+            and evidence.get("game_state")
+            == {
+                "GAME_OVER": "game_over",
+                "TOURNAMENT_RESULTS": "tournament_results",
+            }.get(terminal)
+            and isinstance(policy, Mapping)
+            and policy.get("allowed") is True
+        ):
+            return context, acquisition, mapping_observer, frame, "disabled"
+
+        runtime_save = (
+            getattr(acquisition.snapshot, "runtime_save", None)
+            if isinstance(acquisition, PlayerSaveAcquisitionBundle)
+            and acquisition.snapshot is not None
+            else None
+        )
+        active_round_identity = getattr(
+            runtime_save,
+            "active_round_identity",
+            None,
+        )
+        boundary_fingerprint = self._paused_terminal_boundary_fingerprint(
+            terminal,
+            frame,
+            evidence,
+            terminal_identity=getattr(
+                active_round_identity,
+                "fingerprint",
+                None,
+            ),
+        )
+        claim_fn = getattr(
+            self._supervisor,
+            "claim_paused_terminal_save_refresh",
+            None,
+        )
+        claim = (
+            claim_fn(
+                terminal_state=terminal,
+                boundary_fingerprint=boundary_fingerprint,
+            )
+            if callable(claim_fn)
+            else None
+        )
+        if not isinstance(claim, Mapping):
+            return (
+                context,
+                acquisition,
+                mapping_observer,
+                frame,
+                "already_attempted",
+            )
+
+        request_id = str(
+            self._current_control_request_identity().get("state_request_id")
+            or ""
+        ).strip()
+        runtime_claim = {
+            **dict(claim),
+            "state_request_id": request_id,
+            "binding": {
+                field: copy.deepcopy(evidence.get(field))
+                for field in (
+                    "runtime_id",
+                    "pid",
+                    "adb_target",
+                    "target_generation",
+                )
+            },
+        }
+        serializer = GuardedPlayerSaveSerializer(
+            acquirer=self._player_save_acquirer,
+            context_guard_fn=lambda: (
+                self._paused_terminal_save_refresh_context_matches(
+                    runtime_claim
+                )
+            ),
+            action_guard_fn=lambda: (
+                self._paused_terminal_save_refresh_action_allowed(
+                    runtime_claim
+                )
+            ),
+            source_guard_fn=lambda source_frame, _stable: (
+                self._terminal_source_frame_matches(source_frame, terminal)
+            ),
+            input_log_fn=log_input,
+            debug_log_fn=log,
+            log_prefix="PAUSED_TERMINAL_SAVE_REFRESH",
+            allow_paused_terminal_save_refresh=True,
+        )
+        self._active_paused_terminal_save_refresh_claim = runtime_claim
+        try:
+            serialized = serializer.acquire(
+                expected_target=str(evidence.get("adb_target") or ""),
+                expected_generation=int(
+                    evidence.get("target_generation") or 0
+                ),
+                target_generation_detail=hashlib.sha256(
+                    (
+                        f"{evidence.get('adb_target')}\0"
+                        f"{evidence.get('target_generation')}"
+                    ).encode("utf-8")
+                ).hexdigest()[:16],
+                source_label=(
+                    "Tournament Results"
+                    if terminal == "TOURNAMENT_RESULTS"
+                    else "Game Over"
+                ),
+                initial_frame=frame,
+            )
+        finally:
+            self._active_paused_terminal_save_refresh_claim = None
+
+        completion_status = (
+            "complete"
+            if serialized.status is GuardedSerializationStatus.COMPLETE
+            else "blocked"
+            if serialized.status is GuardedSerializationStatus.BLOCKED
+            else "unavailable"
+        )
+        complete_fn = getattr(
+            self._supervisor,
+            "complete_paused_terminal_save_refresh",
+            None,
+        )
+        if callable(complete_fn):
+            complete_fn(
+                str(claim.get("claim_id") or ""),
+                status=completion_status,
+                reason=serialized.reason,
+            )
+        if serialized.lifecycle_input_attempted and not serialized.source_restored:
+            self._supervisor.pause_for_catastrophic_failure(
+                RuntimeFailureKind.SOURCE_RESTORATION_LOST,
+                reason=serialized.reason,
+            )
+            return context, acquisition, mapping_observer, None, "restore_failed"
+        if not serialized.source_restored:
+            return (
+                context,
+                acquisition,
+                mapping_observer,
+                frame,
+                completion_status,
+            )
+
+        refreshed_frame = self._capture_frame()
+        if refreshed_frame is None:
+            return context, acquisition, mapping_observer, None, "recapture_failed"
+        detection = detect_state_and_overlays(
+            refreshed_frame,
+            log_matches=self._match_trace,
+        )
+        if str(detection.get("state") or "").strip().upper() != terminal:
+            return (
+                context,
+                acquisition,
+                mapping_observer,
+                None,
+                "terminal_not_restored",
+            )
+        self._record_control_observation(detection)
+        refreshed_context, refreshed_acquisition, refreshed_observer = (
+            self._terminal_battle_bundle(
+                terminal,
+                observed_run_configuration=observed_run_configuration,
+            )
+        )
+        return (
+            refreshed_context,
+            refreshed_acquisition,
+            refreshed_observer,
+            refreshed_frame,
+            completion_status,
         )
 
     def _capture_terminal_player_save(
@@ -18325,6 +18625,20 @@ class App:
                     self._emit_event_mission_warnings()
 
                 if (
+                    is_paused
+                    and new_state in {"GAME_OVER", "TOURNAMENT_RESULTS"}
+                    and self._observe_paused_terminal_boundary(
+                        new_state,
+                        img,
+                    )
+                ):
+                    # Observation and optional one-shot serialization retained
+                    # the terminal. No strategy, handler, or route input may
+                    # inherit this pre-refresh frame while Pause remains.
+                    time.sleep(5.0)
+                    continue
+
+                if (
                     strategy_action_allowed
                     and self._handler_enabled("auto_return")
                     and self._runtime_policy().get("auto_return", True) is not False
@@ -19659,10 +19973,116 @@ class App:
             isinstance(lease, Mapping)
             and lease.get("request_state") != "terminal"
         )
+        paused_terminal_refresh_allowed = bool(
+            AUTOMATION.paused_terminal_save_refresh_requested
+            and self._paused_terminal_save_refresh_action_allowed(
+                getattr(
+                    self,
+                    "_active_paused_terminal_save_refresh_claim",
+                    None,
+                ),
+                refresh_control=False,
+            )
+        )
         return bool(
-            self._supervisor.control_state == "RUNNING"
+            (
+                self._supervisor.control_state == "RUNNING"
+                or paused_terminal_refresh_allowed
+            )
             and not development_requested
             and not getattr(self, "_runtime_shutting_down", False)
+        )
+
+    def _paused_terminal_save_refresh_context_matches(
+        self,
+        claim: object,
+        *,
+        refresh_control: bool = True,
+    ) -> bool:
+        """Revalidate the exact Pause, terminal, runtime, and target claim."""
+
+        if not isinstance(claim, Mapping):
+            return False
+        supervisor = getattr(self, "_supervisor", None)
+        if supervisor is None:
+            return False
+        if refresh_control:
+            try:
+                supervisor.apply_control()
+            except Exception:
+                return False
+        request_identity = self._current_control_request_identity()
+        current = self._current_control_workflow_evidence()
+        binding = claim.get("binding")
+        terminal = str(claim.get("terminal_state") or "").strip().upper()
+        if not (
+            supervisor.control_state == "PAUSED"
+            and str(request_identity.get("state_request_id") or "")
+            == str(claim.get("state_request_id") or "")
+            and isinstance(current, Mapping)
+            and isinstance(binding, Mapping)
+            and current.get("game_state")
+            == {
+                "GAME_OVER": "game_over",
+                "TOURNAMENT_RESULTS": "tournament_results",
+            }.get(terminal)
+            and all(
+                current.get(field) == binding.get(field)
+                for field in (
+                    "runtime_id",
+                    "pid",
+                    "adb_target",
+                    "target_generation",
+                )
+            )
+        ):
+            return False
+        claim_current = getattr(
+            supervisor,
+            "paused_terminal_save_refresh_claim_current",
+            None,
+        )
+        if not callable(claim_current) or claim_current(claim) is not True:
+            return False
+        catastrophic_hold = getattr(
+            supervisor,
+            "catastrophic_pause_hold",
+            None,
+        )
+        if (
+            getattr(self, "_runtime_shutting_down", False)
+            or (
+                isinstance(catastrophic_hold, Mapping)
+                and catastrophic_hold.get("active") is True
+            )
+            or getattr(self, "_external_development_hold_active", False)
+            or getattr(self, "_emulator_maintenance_hold_active", False)
+            or getattr(self, "_exclusive_validation_terminal_hold", None)
+            or getattr(self, "_exclusive_validation_in_progress", False)
+            or getattr(
+                self,
+                "_exclusive_validation_launch_in_progress",
+                False,
+            )
+            or self._uninstalled_durable_action_owner_pending()
+        ):
+            return False
+        return True
+
+    def _paused_terminal_save_refresh_action_allowed(
+        self,
+        claim: object,
+        *,
+        refresh_control: bool = True,
+    ) -> bool:
+        """Grant only the claimed terminal background/restore transaction."""
+
+        return bool(
+            AUTOMATION.paused_terminal_save_refresh_requested
+            and self._paused_terminal_save_refresh_context_matches(
+                claim,
+                refresh_control=refresh_control,
+            )
         )
 
     def _uninstalled_durable_action_owner_pending(self) -> bool:
@@ -20668,6 +21088,284 @@ class App:
                         return True
         return False
 
+    @staticmethod
+    def _tournament_details_complete(record: object) -> bool:
+        """Treat real partial records distinctly while tolerating test doubles."""
+
+        if not isinstance(record, Mapping):
+            return False
+        detailed = record.get("detailed_stats")
+        if detailed is None:
+            return True
+        return bool(
+            isinstance(detailed, Mapping)
+            and isinstance(detailed.get("quality"), Mapping)
+            and detailed["quality"].get("valid") is True
+        )
+
+    def _remember_tournament_degradation_snapshot(
+        self,
+        context: Mapping[str, Any],
+    ) -> None:
+        """Retain the ended Strategy's degradation before finalization."""
+
+        if getattr(
+            self,
+            "_tournament_degradation_snapshot_observed",
+            False,
+        ):
+            return
+        candidate = context.get("running_configuration_degradation")
+        self._tournament_degradation_snapshot = (
+            dict(candidate)
+            if isinstance(candidate, Mapping)
+            and self._degradation_requires_home_repair(candidate)
+            else None
+        )
+        self._tournament_degradation_snapshot_observed = True
+
+    @staticmethod
+    def _game_over_details_complete(record: object) -> bool:
+        """Return whether a real paused record needs later terminal UI enrichment."""
+
+        if not isinstance(record, Mapping):
+            return False
+        # Small in-process extension/test records predate this distinction and
+        # remain complete by contract. Real records always carry both sections.
+        if "more_stats" not in record and "perks" not in record:
+            return True
+        more_stats = record.get("more_stats")
+        perks = record.get("perks")
+        return bool(
+            isinstance(more_stats, Mapping)
+            and isinstance(more_stats.get("quality"), Mapping)
+            and more_stats["quality"].get("valid") is True
+            and isinstance(perks, Mapping)
+            and isinstance(perks.get("quality"), Mapping)
+            and perks["quality"].get("valid") is True
+        )
+
+    def _observe_paused_terminal_boundary(
+        self,
+        new_state: str,
+        img: Frame,
+    ) -> bool:
+        """Capture terminal records while retaining global Pause for all routing."""
+
+        terminal = str(new_state or "").strip().upper()
+        if terminal not in {"GAME_OVER", "TOURNAMENT_RESULTS"}:
+            return False
+        if not (
+            getattr(self._supervisor, "is_paused", False)
+            and self._handler_enabled("game_over")
+        ):
+            return False
+        evidence = self._current_control_workflow_evidence()
+        if not isinstance(evidence, Mapping):
+            return True
+        boundary_fingerprint = self._paused_terminal_boundary_fingerprint(
+            terminal,
+            img,
+            evidence,
+        )
+        observations = getattr(
+            self,
+            "_paused_terminal_observations",
+            None,
+        )
+        if not isinstance(observations, dict):
+            observations = {}
+            self._paused_terminal_observations = observations
+        retained = observations.get(boundary_fingerprint)
+        now = time.monotonic()
+        if isinstance(retained, Mapping):
+            if retained.get("complete") is True:
+                return True
+            if float(retained.get("retry_at") or 0.0) > now:
+                return True
+
+        operation_id = new_operation_id()
+        label = (
+            "Tournament"
+            if terminal == "TOURNAMENT_RESULTS"
+            else "finished battle"
+        )
+        log_action_intent(
+            f"Capturing the {label} while Automation is Paused",
+            reason=(
+                "preserve terminal evidence without dismissing, navigating, "
+                "or opening terminal detail panels"
+            ),
+            detail=(
+                "[PAUSED_TERMINAL_OBSERVATION] result=pending "
+                f"terminal={terminal} boundary={boundary_fingerprint[:16]}"
+            ),
+            operation_id=operation_id,
+        )
+        strategy = self._mission_mgr.strategy
+        no_strategy_run = strategy is None
+        observed_run_configuration = (
+            self._no_strategy_observer.snapshot(
+                finalized=terminal == "TOURNAMENT_RESULTS"
+            )
+            if no_strategy_run
+            and getattr(self, "_no_strategy_observation_active", False)
+            else None
+        )
+        (
+            terminal_context,
+            terminal_acquisition,
+            terminal_mapping_observer,
+            terminal_frame,
+            refresh_status,
+        ) = self._paused_terminal_battle_bundle(
+            terminal,
+            img,
+            observed_run_configuration=observed_run_configuration,
+        )
+        if terminal_frame is None:
+            observations[boundary_fingerprint] = {
+                "complete": False,
+                "retry_at": now + 5.0,
+            }
+            log_result(
+                f"Paused {label} capture deferred — terminal restoration or "
+                "recapture was not proved",
+                detail=(
+                    "[PAUSED_TERMINAL_OBSERVATION] result=deferred "
+                    f"terminal={terminal} refresh={refresh_status} retry=true"
+                ),
+                operation_id=operation_id,
+            )
+            return True
+
+        record: Optional[dict[str, Any]]
+        if terminal == "TOURNAMENT_RESULTS":
+            first_capture = not getattr(
+                self,
+                "_tournament_results_captured",
+                False,
+            )
+            record = handle_tournament_results(
+                terminal_frame,
+                battle_context=terminal_context,
+                mapping_observation_fn=(
+                    terminal_mapping_observer.record_mapping_observation
+                    if terminal_mapping_observer is not None
+                    else None
+                ),
+                action_guard_fn=lambda: False,
+                allow_ui_fallback=False,
+            )
+            if record is not None:
+                self._tournament_results_captured = True
+                details_complete = self._tournament_details_complete(record)
+                self._tournament_result_details_complete = details_complete
+                if first_capture:
+                    self._remember_tournament_degradation_snapshot(
+                        terminal_context
+                    )
+                    if observed_run_configuration is not None:
+                        self._end_no_strategy_observation_boundary()
+                    self._mission_mgr.on_game_over()
+                    self._status_reporter.reset_coin_rate_samples()
+                    self._strategy_boundary_confirmed = True
+                    self._apply_pending_strategy()
+                observations[boundary_fingerprint] = {
+                    "complete": details_complete,
+                    "retry_at": now + 5.0,
+                }
+                log_result(
+                    "Paused Tournament capture complete — "
+                    + (
+                        "summary and detailed stats saved"
+                        if details_complete
+                        else "summary saved; detail enrichment remains pending"
+                    ),
+                    detail=(
+                        "[PAUSED_TERMINAL_OBSERVATION] result=completed "
+                        f"terminal={terminal} refresh={refresh_status} "
+                        f"record={record.get('tournament_id')} "
+                        f"details_complete={str(details_complete).lower()} "
+                        "screen=retained"
+                    ),
+                    operation_id=operation_id,
+                )
+                return True
+        else:
+            outcome = capture_game_over_observation(
+                battle_context=terminal_context,
+                mapping_observation_fn=(
+                    terminal_mapping_observer.record_mapping_observation
+                    if terminal_mapping_observer is not None
+                    else None
+                ),
+            )
+            record = outcome.record
+            if record is not None:
+                current = self._current_control_workflow_evidence()
+                binding = (
+                    {
+                        field: copy.deepcopy(current.get(field))
+                        for field in (
+                            "runtime_id",
+                            "pid",
+                            "adb_target",
+                            "target_generation",
+                            "active_round_identity_fingerprint",
+                        )
+                    }
+                    if isinstance(current, Mapping)
+                    else None
+                )
+                self._paused_game_over_record = {
+                    "binding": binding,
+                    "boundary_fingerprint": boundary_fingerprint,
+                    "record": record,
+                    "boundary_finalized": True,
+                    "capture_complete": self._game_over_details_complete(
+                        record
+                    ),
+                    "no_strategy_run": no_strategy_run,
+                    "observed_run_configuration": copy.deepcopy(
+                        observed_run_configuration
+                    ),
+                }
+                self._mission_mgr.on_game_over()
+                self._status_reporter.reset_coin_rate_samples()
+                self._strategy_boundary_confirmed = True
+                self._apply_pending_strategy()
+                observations[boundary_fingerprint] = {
+                    "complete": True,
+                    "retry_at": 0.0,
+                }
+                log_result(
+                    "Paused finished-battle capture complete — save-backed "
+                    "record saved and Game Over retained",
+                    detail=(
+                        "[PAUSED_TERMINAL_OBSERVATION] result=completed "
+                        f"terminal={terminal} refresh={refresh_status} "
+                        f"record={record.get('battle_id')} screen=retained"
+                    ),
+                    operation_id=operation_id,
+                )
+                return True
+
+        observations[boundary_fingerprint] = {
+            "complete": False,
+            "retry_at": now + 5.0,
+        }
+        log_result(
+            f"Paused {label} capture retained the terminal screen, but a "
+            "structured record is not complete yet",
+            detail=(
+                "[PAUSED_TERMINAL_OBSERVATION] result=deferred "
+                f"terminal={terminal} refresh={refresh_status} retry=true"
+            ),
+            operation_id=operation_id,
+        )
+        return True
+
     def _handle_primary_states(
         self,
         new_state: str,
@@ -20692,9 +21390,14 @@ class App:
                 return
         if new_state == "RUNNING":
             self._tournament_results_captured = False
+            self._tournament_result_details_complete = False
             self._tournament_terminal_continuation_bound = False
             self._tournament_terminal_continuation_claim = None
             self._tournament_degradation_snapshot = None
+            self._tournament_degradation_snapshot_observed = False
+            self._tournament_degradation_prepared = False
+            self._paused_terminal_observations = {}
+            self._paused_game_over_record = None
         if (
             not operator_workflow_only
             and self._handler_enabled("daily_gem")
@@ -20747,8 +21450,26 @@ class App:
                 "_tournament_terminal_continuation_bound",
                 False,
             ):
-                degradation_snapshot = None
-                if AUTOMATION.mode is ExecMode.NEXT_BATTLE:
+                degradation_observed = bool(
+                    getattr(
+                        self,
+                        "_tournament_degradation_snapshot_observed",
+                        False,
+                    )
+                )
+                degradation_snapshot = (
+                    getattr(
+                        self,
+                        "_tournament_degradation_snapshot",
+                        None,
+                    )
+                    if degradation_observed
+                    else None
+                )
+                if (
+                    not degradation_observed
+                    and AUTOMATION.mode is ExecMode.NEXT_BATTLE
+                ):
                     degradation_fn = getattr(
                         self._mission_mgr,
                         "running_configuration_degradation",
@@ -20761,12 +21482,17 @@ class App:
                     )
                     if self._degradation_requires_home_repair(candidate):
                         degradation_snapshot = dict(candidate)
-                        log(
-                            "[RUNTIME_POLICY] Continue automatically will "
-                            "repair degraded Tournament configuration at Home",
-                            "INFO",
-                            console=True,
-                        )
+                    self._tournament_degradation_snapshot_observed = True
+                if (
+                    AUTOMATION.mode is ExecMode.NEXT_BATTLE
+                    and isinstance(degradation_snapshot, Mapping)
+                ):
+                    log(
+                        "[RUNTIME_POLICY] Continue automatically will "
+                        "repair degraded Tournament configuration at Home",
+                        "INFO",
+                        console=True,
+                    )
                 self._tournament_degradation_snapshot = degradation_snapshot
                 self._tournament_terminal_continuation_claim = (
                     self._build_terminal_home_continuation_claim(
@@ -20779,19 +21505,35 @@ class App:
                 "_tournament_terminal_continuation_claim",
                 None,
             )
-            if (
+            already_captured = bool(
                 getattr(self, "_tournament_results_captured", False)
-                and terminal_policy == ExecMode.WAIT.value
+            )
+            details_complete = bool(
+                getattr(
+                    self,
+                    "_tournament_result_details_complete",
+                    already_captured,
+                )
+            )
+            if already_captured and details_complete and (
+                terminal_policy == ExecMode.WAIT.value
             ):
                 return
             operation_id = new_operation_id()
             record = None
-            if not getattr(self, "_tournament_results_captured", False):
+            if not already_captured or not details_complete:
+                first_capture = not already_captured
                 log_action_intent(
-                    "Capturing the finished Tournament",
+                    (
+                        "Capturing the finished Tournament"
+                        if first_capture
+                        else "Enriching the retained Tournament result"
+                    ),
                     reason=(
                         "preserve its result before following the selected "
                         "post-terminal policy"
+                        if first_capture
+                        else "complete details that were unavailable during Pause"
                     ),
                     detail=(
                         "[TOURNAMENT_RESULTS] result=pending "
@@ -20850,34 +21592,29 @@ class App:
                     )
                     return
                 self._tournament_results_captured = True
-                if tournament_observed_configuration is not None:
-                    self._end_no_strategy_observation_boundary()
-                self._mission_mgr.on_game_over()
-                self._status_reporter.reset_coin_rate_samples()
-                self._strategy_boundary_confirmed = True
-                self._apply_pending_strategy()
-                degradation_snapshot = getattr(
-                    self,
-                    "_tournament_degradation_snapshot",
-                    None,
-                )
-                if (
-                    isinstance(degradation_snapshot, Mapping)
-                    and self._mission_mgr.strategy is not None
-                ):
-                    prepared = self._mission_mgr.prepare_degraded_home_repair(
-                        degradation_snapshot
+                details_complete = self._tournament_details_complete(record)
+                self._tournament_result_details_complete = details_complete
+                if first_capture:
+                    self._remember_tournament_degradation_snapshot(
+                        tournament_context
                     )
-                    if not prepared:
-                        self._flag_recoverable_runtime_failure(
-                            RuntimeFailureKind.REPORTING_FAILURE,
-                            "degraded Tournament Home repair state could not "
-                            "be prepared",
-                        )
+                    if tournament_observed_configuration is not None:
+                        self._end_no_strategy_observation_boundary()
+                    self._mission_mgr.on_game_over()
+                    self._status_reporter.reset_coin_rate_samples()
+                    self._strategy_boundary_confirmed = True
+                    self._apply_pending_strategy()
                 if terminal_policy == ExecMode.WAIT.value:
                     log_result(
-                        "Tournament finished — result saved; Tournament Results "
-                        "remains visible under the explicit wait policy",
+                        (
+                            "Tournament finished — result saved; Tournament "
+                            "Results remains visible under the explicit wait "
+                            "policy"
+                            if details_complete
+                            else "Tournament finished — result summary saved; "
+                            "detail enrichment remains pending while Tournament "
+                            "Results stays visible under the explicit wait policy"
+                        ),
                         detail=(
                             "[TOURNAMENT_RESULTS] result=completed "
                             f"tournament_id={record.get('tournament_id')} "
@@ -20899,6 +21636,32 @@ class App:
                     ),
                     operation_id=operation_id,
                 )
+
+            degradation_snapshot = getattr(
+                self,
+                "_tournament_degradation_snapshot",
+                None,
+            )
+            if (
+                isinstance(degradation_snapshot, Mapping)
+                and terminal_policy == ExecMode.NEXT_BATTLE.value
+                and self._mission_mgr.strategy is not None
+                and not getattr(
+                    self,
+                    "_tournament_degradation_prepared",
+                    False,
+                )
+            ):
+                prepared = self._mission_mgr.prepare_degraded_home_repair(
+                    degradation_snapshot
+                )
+                if prepared:
+                    self._tournament_degradation_prepared = True
+                else:
+                    self._flag_recoverable_runtime_failure(
+                        RuntimeFailureKind.REPORTING_FAILURE,
+                        "degraded Tournament Home repair state could not be prepared",
+                    )
 
             if terminal_policy == ExecMode.WAIT.value:
                 log_result(
@@ -20975,6 +21738,89 @@ class App:
                 # screen; never replay collection or navigation from it.
                 return
             current_manual_evidence = self._current_control_workflow_evidence()
+            paused_terminal_capture = getattr(
+                self,
+                "_paused_game_over_record",
+                None,
+            )
+            if isinstance(paused_terminal_capture, Mapping):
+                expected_binding = paused_terminal_capture.get("binding")
+                binding_fields = (
+                    "runtime_id",
+                    "pid",
+                    "adb_target",
+                    "target_generation",
+                )
+                expected_identity = str(
+                    (
+                        expected_binding.get(
+                            "active_round_identity_fingerprint"
+                        )
+                        or ""
+                    )
+                    if isinstance(expected_binding, Mapping)
+                    else ""
+                ).strip()
+                current_identity = str(
+                    (
+                        current_manual_evidence.get(
+                            "active_round_identity_fingerprint"
+                        )
+                        or ""
+                    )
+                    if isinstance(current_manual_evidence, Mapping)
+                    else ""
+                ).strip()
+                retained_boundary = str(
+                    paused_terminal_capture.get("boundary_fingerprint")
+                    or ""
+                ).strip()
+                current_boundary = (
+                    self._paused_terminal_boundary_fingerprint(
+                        "GAME_OVER",
+                        img,
+                        current_manual_evidence,
+                    )
+                    if isinstance(current_manual_evidence, Mapping)
+                    else ""
+                )
+                if not (
+                    isinstance(paused_terminal_capture.get("record"), dict)
+                    and isinstance(expected_binding, Mapping)
+                    and isinstance(current_manual_evidence, Mapping)
+                    and current_manual_evidence.get("game_state")
+                    == "game_over"
+                    and (
+                        expected_identity == current_identity != ""
+                        or retained_boundary == current_boundary != ""
+                    )
+                    and all(
+                        expected_binding.get(field)
+                        == current_manual_evidence.get(field)
+                        for field in binding_fields
+                    )
+                ):
+                    self._paused_game_over_record = None
+                    paused_terminal_capture = None
+            paused_capture_complete = bool(
+                isinstance(paused_terminal_capture, Mapping)
+                and paused_terminal_capture.get("capture_complete", True)
+                is True
+            )
+            paused_record = (
+                paused_terminal_capture.get("record")
+                if isinstance(paused_terminal_capture, Mapping)
+                and isinstance(paused_terminal_capture.get("record"), dict)
+                else None
+            )
+            paused_captured_at = None
+            if isinstance(paused_record, Mapping):
+                try:
+                    paused_captured_at = datetime.fromisoformat(
+                        str(paused_record.get("captured_at") or "")
+                    )
+                except ValueError:
+                    paused_captured_at = None
             owned_development_terminal_claim = (
                 self._matching_interactive_development_owned_terminal_claim(
                     current_manual_evidence
@@ -21061,9 +21907,25 @@ class App:
                 )
             log("Detected GAME_OVER. Executing handler.", "INFO", console=True)
             strategy = self._mission_mgr.strategy
-            no_strategy_run = strategy is None
+            no_strategy_run = (
+                bool(paused_terminal_capture.get("no_strategy_run"))
+                if isinstance(paused_terminal_capture, Mapping)
+                else strategy is None
+            )
             observed_run_configuration = (
-                self._no_strategy_observer.snapshot()
+                copy.deepcopy(
+                    paused_terminal_capture.get(
+                        "observed_run_configuration"
+                    )
+                )
+                if isinstance(paused_terminal_capture, Mapping)
+                and isinstance(
+                    paused_terminal_capture.get(
+                        "observed_run_configuration"
+                    ),
+                    Mapping,
+                )
+                else self._no_strategy_observer.snapshot()
                 if no_strategy_run
                 else None
             )
@@ -21166,8 +22028,14 @@ class App:
             else:
                 terminal_continuation_claim = None
             boundary_finalized = bool(
-                isinstance(pending_terminal_route, Mapping)
-                and pending_terminal_route.get("boundary_finalized")
+                (
+                    isinstance(pending_terminal_route, Mapping)
+                    and pending_terminal_route.get("boundary_finalized")
+                )
+                or (
+                    isinstance(paused_terminal_capture, Mapping)
+                    and paused_terminal_capture.get("boundary_finalized")
+                )
             )
 
             def finalize_run_boundary() -> None:
@@ -21532,6 +22400,10 @@ class App:
             terminal_outcome = handle_game_over(
                 capture_stats=(
                     not isinstance(pending_terminal_route, Mapping)
+                    and (
+                        not isinstance(paused_terminal_capture, Mapping)
+                        or not paused_capture_complete
+                    )
                     and repair_terminal_failure_reason is None
                     and not repair_in_progress
                     and owned_development_terminal_claim is None
@@ -21590,6 +22462,8 @@ class App:
                         terminal_acquisition,
                         PlayerSaveAcquisitionBundle,
                     )
+                    else paused_captured_at
+                    if isinstance(paused_captured_at, datetime)
                     else None
                 ),
                 battle_id=(
@@ -21599,6 +22473,9 @@ class App:
                         terminal_acquisition,
                         PlayerSaveAcquisitionBundle,
                     )
+                    else str(paused_record.get("battle_id") or "")
+                    if isinstance(paused_record, Mapping)
+                    and isinstance(paused_captured_at, datetime)
                     else None
                 ),
                 mapping_observation_fn=(
@@ -21631,6 +22508,12 @@ class App:
                 and isinstance(pending_terminal_route.get("record"), dict)
             ):
                 completed_record = pending_terminal_route.get("record")
+            if (
+                completed_record is None
+                and isinstance(paused_terminal_capture, Mapping)
+                and isinstance(paused_terminal_capture.get("record"), dict)
+            ):
+                completed_record = paused_terminal_capture.get("record")
             if not terminal_outcome.route_completed:
                 # Keep the selected terminal policy and existing control
                 # authority. A later fresh frame retries the bounded terminal
@@ -21674,8 +22557,10 @@ class App:
                     ),
                     "retry_at": 0.0,
                 }
+                self._paused_game_over_record = None
                 return
             self._pending_game_over_route = None
+            self._paused_game_over_record = None
             if terminal_outcome.route == "home":
                 self._commit_terminal_home_continuation(
                     terminal_continuation_claim

@@ -167,6 +167,7 @@ def handle_game_over(
                 disposition=disposition,
                 action_guard_fn=action_guard_fn,
                 mapping_observation_fn=mapping_observation_fn,
+                allow_ui_fallback=True,
             )
         except Exception as exc:
             # Data extraction is deliberately subordinate to the selected
@@ -324,6 +325,53 @@ def handle_game_over(
     )
 
 
+def capture_game_over_observation(
+    *,
+    battle_context: Optional[Mapping[str, Any]] = None,
+    captured_at: Optional[datetime] = None,
+    battle_id: Optional[str] = None,
+    mapping_observation_fn: Optional[
+        Callable[[str, Mapping[str, Any]], int]
+    ] = None,
+) -> GameOverHandlingOutcome:
+    """Persist save-backed Game Over evidence without terminal UI input."""
+
+    when = captured_at or datetime.now().astimezone()
+    expected_battle_id = make_battle_id(when)
+    if battle_id is not None and str(battle_id) != expected_battle_id:
+        raise ValueError("battle_id does not match the supplied capture time")
+    normalized_battle_id = str(battle_id or expected_battle_id)
+    session_id = _make_session_id(when.timetuple())
+    try:
+        outcome = _capture_game_over_stats(
+            battle_context=battle_context,
+            battle_id=normalized_battle_id,
+            captured_at=when,
+            session_id=session_id,
+            disposition=None,
+            action_guard_fn=lambda: False,
+            mapping_observation_fn=mapping_observation_fn,
+            allow_ui_fallback=False,
+        )
+    except Exception as exc:
+        log(
+            "[BATTLE_STATS] Paused terminal observation failed without "
+            f"changing game state: {exc}",
+            "ERROR",
+            console=True,
+        )
+        outcome = _GameOverStatsCaptureOutcome(
+            failure_step=f"paused terminal observation: {exc}",
+        )
+    return GameOverHandlingOutcome(
+        False,
+        "retained",
+        outcome.record,
+        "saved" if outcome.record is not None else "unavailable",
+        outcome.failure_step,
+    )
+
+
 def _capture_game_over_stats(
     *,
     battle_context: Optional[Mapping[str, Any]],
@@ -335,6 +383,7 @@ def _capture_game_over_stats(
     mapping_observation_fn: Optional[
         Callable[[str, Mapping[str, Any]], int]
     ],
+    allow_ui_fallback: bool,
 ) -> _GameOverStatsCaptureOutcome:
     """Attempt terminal collection without owning the Home/Retry decision."""
 
@@ -356,6 +405,7 @@ def _capture_game_over_stats(
     perks, perks_frames, perks_screen_restored = _resolve_game_over_perks(
         context,
         action_guard_fn=action_guard_fn,
+        allow_ui_fallback=allow_ui_fallback,
     )
     if not perks_screen_restored:
         log(
@@ -398,9 +448,18 @@ def _capture_game_over_stats(
 
     log(
         "[BATTLE_STATS] Save-backed report unavailable "
-        f"({save_reason}); using verified More Stats fallback",
+        f"({save_reason}); "
+        + (
+            "using verified More Stats fallback"
+            if allow_ui_fallback
+            else "terminal UI enrichment remains deferred while input is paused"
+        ),
         "INFO",
     )
+    if not allow_ui_fallback:
+        return _GameOverStatsCaptureOutcome(
+            failure_step="Save-backed terminal report unavailable",
+        )
     # Tap More Stats only after Perks capture has restored Game Stats. A miss
     # leaves the terminal modal untouched, so routing may continue immediately.
     if not tap_if_visible(
@@ -975,6 +1034,7 @@ def _resolve_game_over_perks(
     context: dict[str, Any],
     *,
     action_guard_fn: Optional[Callable[[], bool]] = None,
+    allow_ui_fallback: bool = True,
 ):
     """Use saved finality, bounded top-tail repair, or the full UI fallback."""
 
@@ -1013,6 +1073,17 @@ def _resolve_game_over_perks(
                 "INFO",
             )
             return dict(inventory), [], True
+
+    if not allow_ui_fallback:
+        return (
+            ocr_selected_perks(
+                [],
+                source_complete=False,
+                source_reason="terminal_ui_deferred_while_paused",
+            ),
+            [],
+            True,
+        )
 
     can_reconcile_top = bool(
         isinstance(monitoring, Mapping)

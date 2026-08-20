@@ -100,6 +100,7 @@ class GuardedPlayerSaveSerializer:
         input_log_fn: Callable[..., None] = log_input,
         debug_log_fn: Callable[..., None] = log,
         log_prefix: str = "PLAYER_SAVE_SERIALIZATION",
+        allow_paused_terminal_save_refresh: bool = False,
     ) -> None:
         if not isinstance(acquirer, StablePlayerSaveAcquirer):
             raise TypeError("guarded serialization requires the shared acquirer")
@@ -127,6 +128,13 @@ class GuardedPlayerSaveSerializer:
         self._input_log_fn = input_log_fn
         self._debug_log_fn = debug_log_fn
         self._log_prefix = str(log_prefix or "PLAYER_SAVE_SERIALIZATION")
+        if type(allow_paused_terminal_save_refresh) is not bool:
+            raise TypeError(
+                "allow_paused_terminal_save_refresh must be a boolean"
+            )
+        self._allow_paused_terminal_save_refresh = (
+            allow_paused_terminal_save_refresh
+        )
 
     def acquire(
         self,
@@ -196,6 +204,9 @@ class GuardedPlayerSaveSerializer:
         with AUTOMATION.authorize_mutation(
             self._action_allowed,
             defer_dispatch_boundary=True,
+            allow_paused_terminal_save_refresh=(
+                self._allow_paused_terminal_save_refresh
+            ),
         ) as allowed:
             if not allowed:
                 return _blocked(

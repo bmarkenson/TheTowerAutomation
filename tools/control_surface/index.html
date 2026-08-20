@@ -61,7 +61,7 @@
           </div>
           <span id="ackBadge" class="mini-badge neutral">Unconfirmed</span>
         </div>
-        <p class="muted">Automation Paused means zero automated device input; observation continues. Automation Enabled permits guarded actions and does not claim the game is currently Running.</p>
+        <p class="muted">Automation Paused keeps observation active and blocks ordinary game interaction. By default, one guarded save refresh may briefly background and restore The Tower after a proven Game Over or Tournament Results boundary. Automation Enabled permits guarded actions and does not claim the game is currently Running.</p>
 
         <div class="button-grid">
           <button class="action-button primary" type="button" data-control-action="pause" data-minutes="30">Pause 30 min</button>
@@ -76,6 +76,13 @@
         </div>
         <p id="manualControlSummary" class="fine-print">Automation retains control.</p>
         <p class="fine-print">Taking control first obtains an acknowledged indefinite Pause and asks how a manual Surrender should be collected.</p>
+
+        <div class="gate-options">
+          <label class="gate-option" for="allowTerminalSaveRefresh">
+            <input id="allowTerminalSaveRefresh" type="checkbox" checked>
+            <span><strong>Allow terminal save refresh</strong><span>At a proven Game Over or Tournament Results screen, permit one Android Home/restore save serialization if the stable save still says the round is active. Uncheck for a strict Pause with no lifecycle input.</span></span>
+          </label>
+        </div>
 
         <form id="customPauseForm" class="inline-form">
           <label for="customPauseMinutes">Custom timed pause</label>
@@ -302,7 +309,7 @@
     <form id="manualControlForm">
       <span class="eyebrow">Manual authority</span>
       <h2>Take Manual Control</h2>
-      <p>Automation will first obtain an acknowledged indefinite Pause. Observation may continue, but automated device input will be zero.</p>
+      <p>Automation will first obtain an acknowledged indefinite Pause. Observation may continue, while ordinary automated game interaction remains blocked. The terminal save-refresh choice on the main control card also applies to this Pause.</p>
       <div class="gate-options">
         <label class="gate-option">
           <input type="radio" name="manualSurrenderCollection" value="minimal" checked>

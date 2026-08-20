@@ -275,7 +275,19 @@ class AutomationControl:
                                 pass
         if guards:
             with self._lock:
-                allowed = allowed and self._state is RunState.RUNNING
+                allowed = allowed and (
+                    self._state is RunState.RUNNING
+                    or (
+                        bool(
+                            getattr(
+                                self._mutation_local,
+                                "allow_paused_terminal_save_refresh",
+                                False,
+                            )
+                        )
+                        and self._state is RunState.PAUSED
+                    )
+                )
         return allowed
 
     @contextmanager
@@ -376,12 +388,26 @@ class AutomationControl:
             )
             return self._mutation_guards_allow(effective_action_guard)
 
+    @property
+    def paused_terminal_save_refresh_requested(self) -> bool:
+        """Return whether this thread owns the narrow paused-save transaction."""
+
+        return bool(
+            int(getattr(self._mutation_local, "depth", 0)) > 0
+            and getattr(
+                self._mutation_local,
+                "allow_paused_terminal_save_refresh",
+                False,
+            )
+        )
+
     @contextmanager
     def authorize_mutation(
         self,
         action_guard: Optional[Callable[[], bool]] = None,
         *,
         defer_dispatch_boundary: bool = False,
+        allow_paused_terminal_save_refresh: bool = False,
     ) -> Iterator[bool]:
         """Hold the global dispatch boundary around one device mutation.
 
@@ -389,8 +415,15 @@ class AutomationControl:
         optional workflow guard may add narrower ownership checks, as the
         watchdog does.  Either failure denies the mutation.  With no installed
         runtime and no workflow guard, low-level helpers retain their existing
-        tooling/test behavior.
+        tooling/test behavior. The paused-terminal flag is reserved for the
+        guarded Game Over/Tournament Results serialization owner; nested
+        mutations inherit but cannot elevate that authority.
         """
+
+        if type(allow_paused_terminal_save_refresh) is not bool:
+            raise TypeError(
+                "allow_paused_terminal_save_refresh must be a boolean"
+            )
 
         with self._mutation_lock:
             if self._mutations_shutdown:
@@ -441,6 +474,9 @@ class AutomationControl:
             self._mutation_local.defer_dispatch_boundary = bool(
                 defer_dispatch_boundary
             )
+            self._mutation_local.allow_paused_terminal_save_refresh = bool(
+                allow_paused_terminal_save_refresh
+            )
             self._mutation_local.dispatch_boundary = None
             self._mutation_local.dispatch_boundary_acquired = False
             try:
@@ -460,6 +496,7 @@ class AutomationControl:
                 self._mutation_local.depth = 0
                 self._mutation_local.outer_action_guard = None
                 self._mutation_local.defer_dispatch_boundary = False
+                self._mutation_local.allow_paused_terminal_save_refresh = False
 
     @contextmanager
     def quiescence_boundary(self) -> Iterator[None]:
@@ -482,6 +519,7 @@ class AutomationControl:
             self._mutation_local.depth = 0
             self._mutation_local.outer_action_guard = None
             self._mutation_local.defer_dispatch_boundary = False
+            self._mutation_local.allow_paused_terminal_save_refresh = False
             self._mutation_local.dispatch_boundary = None
             self._mutation_local.dispatch_boundary_acquired = False
             self._mutation_local.scoped_action_guards = ()

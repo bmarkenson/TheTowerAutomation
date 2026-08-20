@@ -161,25 +161,13 @@ def build_tournament_result(
             },
         }
 
-    identity = _compare_wave(summary, detailed)
-    warnings = list(detailed["quality"].get("warnings", []))
-    if not summary["quality"]["valid"]:
-        warnings.append(
-            "Missing required Tournament summary fields: "
-            + ", ".join(summary["quality"]["missing_required_fields"])
-        )
-    if identity["mismatch"]:
-        warnings.append("Tournament summary/detailed wave mismatch")
-    valid = bool(
-        summary["quality"]["valid"]
-        and detailed["quality"]["valid"]
-        and not identity["mismatch"]
-    )
     runtime = dict(runtime_context or {})
     profile_progression = runtime.pop("profile_progression", None)
-    run_binding_warning = unbound_run_evidence_warning(runtime)
-    if run_binding_warning is not None:
-        warnings.append(run_binding_warning)
+    identity, quality = _tournament_result_quality(
+        summary,
+        detailed,
+        runtime,
+    )
     observed_tier = observed_tier_for_record(
         {"runtime": runtime, "detailed_stats": detailed}
     )
@@ -206,9 +194,7 @@ def build_tournament_result(
         "summary": summary,
         "detailed_stats": detailed,
         "quality": {
-            "valid": valid,
-            "retain_source_images": not valid,
-            "warnings": warnings,
+            **quality,
             "identity": identity,
         },
     }
@@ -217,6 +203,52 @@ def build_tournament_result(
             dict(profile_progression)
         )
     return record
+
+
+def attach_tournament_detailed_stats(
+    record: Mapping[str, Any],
+    detailed_stats: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Return one summary record enriched by independently captured details."""
+
+    if not isinstance(detailed_stats, Mapping):
+        raise TypeError("detailed Tournament stats must be a mapping")
+    result = copy.deepcopy(dict(record))
+    summary = result.get("summary")
+    runtime = result.get("runtime")
+    if not isinstance(summary, Mapping) or not isinstance(runtime, Mapping):
+        raise ValueError("Tournament record is missing summary/runtime context")
+    detailed = copy.deepcopy(dict(detailed_stats))
+    if not isinstance(detailed.get("quality"), Mapping):
+        raise ValueError("detailed Tournament stats have no quality evidence")
+    result["schema_version"] = max(
+        SCHEMA_VERSION,
+        int(result.get("schema_version") or 0),
+    )
+    result["detailed_stats"] = detailed
+    identity, quality = _tournament_result_quality(
+        summary,
+        detailed,
+        runtime,
+    )
+    result["quality"] = {**quality, "identity": identity}
+
+    observed_tier = observed_tier_for_record(result)
+    normalized_runtime = dict(runtime)
+    if observed_tier is not None:
+        normalized_runtime["observed_tier"] = observed_tier
+    result["runtime"] = normalized_runtime
+    classification = analyze_battle_type(
+        strategy_name=result.get("strategy"),
+        run_configuration=result.get("run_configuration"),
+        terminal_state=normalized_runtime.get("terminal_state")
+        or "TOURNAMENT_RESULTS",
+        record_id=result.get("tournament_id"),
+        observed_tier=observed_tier,
+    )
+    result["battle_type"] = classification["type"]
+    result["battle_type_analysis"] = classification
+    return result
 
 
 def attach_tournament_conditions(
@@ -291,6 +323,49 @@ def _compare_wave(
             and detailed_wave is not None
             and int(summary_wave) != int(detailed_wave)
         ),
+    }
+
+
+def _tournament_result_quality(
+    summary: Mapping[str, Any],
+    detailed: Mapping[str, Any],
+    runtime: Mapping[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Compute canonical identity and validity for initial or enriched data."""
+
+    identity = _compare_wave(summary, detailed)
+    detailed_quality = detailed.get("quality")
+    summary_quality = summary.get("quality")
+    if not isinstance(detailed_quality, Mapping):
+        detailed_quality = {}
+    if not isinstance(summary_quality, Mapping):
+        summary_quality = {}
+    warnings = list(detailed_quality.get("warnings", []))
+    if summary_quality.get("valid") is not True:
+        warnings.append(
+            "Missing required Tournament summary fields: "
+            + ", ".join(
+                str(item)
+                for item in summary_quality.get(
+                    "missing_required_fields",
+                    [],
+                )
+            )
+        )
+    if identity["mismatch"]:
+        warnings.append("Tournament summary/detailed wave mismatch")
+    run_binding_warning = unbound_run_evidence_warning(runtime)
+    if run_binding_warning is not None:
+        warnings.append(run_binding_warning)
+    valid = bool(
+        summary_quality.get("valid") is True
+        and detailed_quality.get("valid") is True
+        and not identity["mismatch"]
+    )
+    return identity, {
+        "valid": valid,
+        "retain_source_images": not valid,
+        "warnings": warnings,
     }
 
 
@@ -468,7 +543,7 @@ def find_recent_tournament_result(
             captured_at = datetime.fromisoformat(str(record["captured_at"]))
         except (OSError, ValueError, KeyError, json.JSONDecodeError):
             continue
-        if not record.get("quality", {}).get("valid"):
+        if not record.get("summary", {}).get("quality", {}).get("valid"):
             continue
         age = (current_time - captured_at).total_seconds()
         if age < 0 or age > float(within_seconds):
@@ -635,6 +710,7 @@ def _atomic_write(path: Path, payload: str) -> None:
 
 __all__ = [
     "attach_tournament_conditions",
+    "attach_tournament_detailed_stats",
     "backfill_tournament_conditions",
     "build_tournament_result",
     "find_recent_tournament_result",

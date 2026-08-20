@@ -501,8 +501,11 @@ the runtime projection, when present, must be inactive. After the verified
 Retry tap, the successor's first stable `RUNNING` observation forces a new
 serialization and binds the new active-round identity before carry is applied.
 
-Pause blocks input and suspends unconsumed carry pending fresh save or UI
-evidence; it does not quarantine the snapshot. Restart/Stop, attachment,
+Pause blocks ordinary input and suspends unconsumed carry pending fresh save or
+UI evidence; it does not quarantine the snapshot. A separately claimed
+terminal-only Home/restore serialization may refresh an already proven Game
+Over or Tournament Results save, but it grants no carry, configuration, UI, or
+route authority and never runs during battle. Restart/Stop, attachment,
 strategy/configuration/target change, a competing workflow, manual or ambiguous
 launch, wrong transition, or an unrelated later battle discards the carrier.
 A requirement change, unsupported mapping, or incomplete component routes only
@@ -1124,8 +1127,12 @@ The acquisition owner does not own Android input, lifecycle policy, semantic
 projection, or UI fallback. `GuardedPlayerSaveSerializer` continues to own the
 background/restore sequence and may publish a forced bundle only after the
 original source, context, control authority, target, and generation are all
-reverified. A lifecycle owner, rather than a reader-selected string, issues a
-bound Game Over or Tournament Results token for natural-boundary evidence.
+reverified. Its paused-terminal mode additionally requires the same durable
+Pause request, an unconsumed exact-boundary claim, a still-visible Game Over or
+Tournament Results source, and the per-Pause `allowed` choice; it cannot be
+selected by a generic reader. A lifecycle owner, rather than a reader-selected
+string, issues a bound Game Over or Tournament Results token for
+natural-boundary evidence.
 Consumers retain their distinct fail-open, retry, UI-fallback, or input-blocking
 behavior.
 
@@ -1148,8 +1155,9 @@ the snapshot. Unsupported mappings, changed shapes, and unavailable semantic
 components are successful acquisitions followed by projection failures; they
 are not transport failures.
 
-Forced Home and attachment serialization, natural terminal capture, and the
-periodic/explicit-Perk passive paths use this owner. Audit, metrics, History reporting,
+Forced Home and attachment serialization, natural terminal capture (plus its
+optional one-shot paused refresh), and the periodic/explicit-Perk passive paths
+use this owner. Audit, metrics, History reporting,
 and Tournament projection consume a bundle acquired by the actual boundary
 owner; they do not initiate runtime reads. `GuardedPlayerSaveSerializer` retains the full
 lock transaction across backgrounding and restoration and publishes a
@@ -1179,6 +1187,7 @@ degraded evidence.
 | **Return Control** from active or Home Resume | Return records no save while Pause remains authoritative. A later explicit Enable grants the guarded Return owner and forces serialization. | Equal identity resumes the same battle; a different identity adopts the manually started successor before configuration reconciliation. After identity succeeds, unavailable mapped configuration may use supported UI checks and complete degraded. No History/UI identity fallback exists. |
 | **Return Control** at Home New | The Home preflight owner forces serialization for the exact workflow and target. | The save must prove `round_active=false`, which closes the retained battle identity. Configuration may then reconcile or use supported Home UI. The operator starts a separate new battle through Start; Return does not infer or launch one. |
 | **Return Control** at Game Over, including manual Surrender | The preferred route consumes the lifecycle-issued current-process `natural_boundary` bundle, binding exact target generation, terminal active-round identity, terminal observation, structural History transition, and mapped cause. | If terminal projections are unavailable at the still-bound Game Over boundary, Return may use Game Stats, Perks, and More Stats UI. Conflicting owner, target, or canonical identity blocks input. Tournament Results and unknown evidence are not advertised as Return boundaries. |
+| Paused Game Over or Tournament Results observation | Read one `natural_boundary` first. Only when its complete stable runtime projection still says the round is active may the current default Pause claim one guarded Home/restore serialization for that exact terminal boundary; strict Pause disables it. | Save analysis and structured persistence continue while the screen is retained. The claim opens no Perks/More Stats panel and authorizes no dismissal, Home, Retry, or other interaction. Partial Tournament summaries persist and may be enriched later; partial Game Over data reuses its battle ID on Resume. |
 | **Capture current setup as…** | One guarded `forced_serialization` at verified Home New, Home Resume, or active battle produces a redacted provenance receipt plus runtime-operation/target-generation/active-round binding. The preview is derived from that in-memory bundle only. | This authoring preview has no complete supported UI equivalent, so unusable mapping/projection/identity reports `unavailable` and opens no configuration UI. Failure to restore the source after lifecycle input, loss of owner/target, or an uncertain dispatched input is catastrophic and may Pause. Activity scope is optional receipt metadata. |
 | Periodic passive observation | The scheduler attempts one `passive_stable_read` every 300 seconds against an exact current battle binding. Forced serialization and prompt reads do not reset that deadline. | It may retain permitted positive temporal facts. It cannot prove when the game wrote, satisfy a current-evidence workflow, or authorize input. |
 | Perk checkpoint reads | A stable Perk selection or exhaustion event may request one `passive_stable_read`, shared by multiple projectors as one immutable in-memory bundle. Audit and metrics cannot request a read. | It may retain permitted positive temporal facts, but cannot satisfy Attach, Return, capture, negative current-configuration, or completeness claims. |
@@ -1463,11 +1472,14 @@ only the normalized JSON report, never the raw save.
 ## Tournament record attachment
 
 At `TOURNAMENT_RESULTS`, the terminal handler makes one bounded stable save
-read before persistence. Complete exact-version evidence becomes the
-schema-version-2 record's `battle_conditions` field and Markdown section.
-Failure remains explicit, does not invalidate the result, and leaves the UI
-fallback required. A duplicate terminal capture can enrich a recent record
-without reopening its detail controls.
+read before persistence. Under the default Pause policy, a stale-active result
+may consume the exact boundary's one guarded Home/restore refresh; strict Pause
+never does. Complete exact-version evidence becomes the record's
+`battle_conditions` and detailed Stats fields. Failure remains explicit and
+does not invalidate a valid summary: the summary is persisted immediately,
+the Tournament Results screen is retained, and no detail control is opened
+while Paused. A later bound save or enabled UI opportunity enriches that same
+recent record instead of creating a duplicate.
 
 Historical records use explicit UTC event-date mappings rather than assuming
 the Tournament calendar continues forever. The backfill command is dry-run by

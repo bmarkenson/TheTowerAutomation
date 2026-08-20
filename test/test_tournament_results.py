@@ -492,6 +492,87 @@ def test_tournament_handler_uses_bound_save_without_opening_more_stats():
     tap.assert_not_called()
 
 
+def test_paused_tournament_capture_saves_summary_then_enriches_same_record():
+    summary = _load("tournament_stats_20260718.png")
+    captured_at = datetime.fromisoformat("2026-07-18T06:20:00-07:00")
+    persisted = []
+
+    with (
+        patch(
+            "handlers.tournament_result_handler.is_visible",
+            return_value=True,
+        ),
+        patch(
+            "handlers.tournament_result_handler.find_recent_tournament_result",
+            return_value=None,
+        ),
+        patch(
+            "handlers.tournament_result_handler.persist_tournament_result",
+            side_effect=lambda record: persisted.append(record)
+            or (Path("result.json"), Path("result.md")),
+        ),
+        patch("handlers.tournament_result_handler.tap_if_visible") as tap,
+        patch("handlers.tournament_result_handler._retain_evidence"),
+    ):
+        partial = handle_tournament_results(
+            summary,
+            captured_at=captured_at,
+            battle_context={
+                "terminal_save_report": {
+                    "status": "unavailable",
+                    "reason": "save_still_active",
+                }
+            },
+            allow_ui_fallback=False,
+        )
+
+    assert partial is not None
+    assert partial["summary"]["quality"]["valid"] is True
+    assert partial["detailed_stats"]["quality"]["valid"] is False
+    assert len(persisted) == 1
+    tap.assert_not_called()
+
+    detailed = {
+        "source_method": "player_save_battle_history",
+        "quality": {"valid": True, "row_count": 144, "warnings": []},
+        "sections": [],
+    }
+    with (
+        patch(
+            "handlers.tournament_result_handler.is_visible",
+            return_value=True,
+        ),
+        patch(
+            "handlers.tournament_result_handler.find_recent_tournament_result",
+            return_value=partial,
+        ),
+        patch(
+            "handlers.tournament_result_handler.more_stats_from_terminal_save_report",
+            return_value=detailed,
+        ),
+        patch(
+            "handlers.tournament_result_handler.persist_tournament_result",
+            return_value=(Path("result.json"), Path("result.md")),
+        ) as persist,
+        patch("handlers.tournament_result_handler.tap_if_visible") as tap,
+    ):
+        enriched = handle_tournament_results(
+            summary,
+            captured_at=captured_at,
+            battle_context={
+                "terminal_save_report": _complete_terminal_save_report()
+            },
+            allow_ui_fallback=False,
+        )
+
+    assert enriched is not None
+    assert enriched["tournament_id"] == partial["tournament_id"]
+    assert enriched["detailed_stats"] == detailed
+    assert enriched["quality"]["valid"] is True
+    persist.assert_called_once()
+    tap.assert_not_called()
+
+
 def test_round_stats_copy_control_is_matched_not_static():
     detailed = _load("tournament_more_stats_bottom_20260718.png")
 

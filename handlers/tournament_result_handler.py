@@ -29,6 +29,7 @@ from core.ss_capture import capture_adb_screenshot
 from core.state_detector import detect_state_and_overlays
 from core.tournament_results import (
     attach_tournament_conditions,
+    attach_tournament_detailed_stats,
     build_tournament_result,
     find_recent_tournament_result,
     make_tournament_id,
@@ -56,6 +57,7 @@ def handle_tournament_results(
     battle_context: Optional[Mapping[str, Any]] = None,
     captured_at: Optional[datetime] = None,
     action_guard_fn: Optional[Callable[[], bool]] = None,
+    allow_ui_fallback: bool = True,
     mapping_observation_fn: Optional[
         Callable[[str, Mapping[str, Any]], int]
     ] = None,
@@ -88,45 +90,9 @@ def handle_tournament_results(
             "terminal_condition_projection_invalid"
         )
     terminal_save_report = context.pop("terminal_save_report", None)
-
+    if type(allow_ui_fallback) is not bool:
+        raise TypeError("allow_ui_fallback must be a boolean")
     existing = find_recent_tournament_result(summary, now=when)
-    if existing is not None:
-        if (
-            not tournament_conditions_complete(existing.get("battle_conditions"))
-            and tournament_conditions_complete(battle_conditions)
-        ):
-            try:
-                enriched = attach_tournament_conditions(
-                    existing, battle_conditions
-                )
-                persist_tournament_result(enriched)
-            except Exception as exc:
-                log(
-                    "[TOURNAMENT_RESULTS] Could not enrich recent result "
-                    f"with Battle Conditions: {exc}",
-                    "ERROR",
-                    console=True,
-                )
-            else:
-                existing = enriched
-                log(
-                    "[TOURNAMENT_RESULTS] Attached terminal Battle Conditions "
-                    f"to recent result {existing.get('tournament_id')}",
-                    "INFO",
-                    console=True,
-                )
-        log(
-            "[TOURNAMENT_RESULTS] Current summary already matches recent result "
-            f"{existing.get('tournament_id')}; skipping duplicate capture",
-            "INFO",
-            console=True,
-        )
-        _record_tournament_mapping_observations(
-            existing,
-            mapping_observation_fn,
-            observed_at=when,
-        )
-        return existing
 
     clipboard_text = None
     detailed_stats = None
@@ -153,10 +119,98 @@ def handle_tournament_results(
             or "terminal_save_report_unavailable"
         )
 
-    if detailed_stats is None:
+    if existing is not None:
+        enriched = existing
+        changed = False
+        if (
+            not tournament_conditions_complete(enriched.get("battle_conditions"))
+            and tournament_conditions_complete(battle_conditions)
+        ):
+            enriched = attach_tournament_conditions(
+                enriched,
+                battle_conditions,
+            )
+            changed = True
+            log(
+                "[TOURNAMENT_RESULTS] Attached terminal Battle Conditions "
+                f"to recent result {enriched.get('tournament_id')}",
+                "INFO",
+                console=True,
+            )
+        existing_details_complete = bool(
+            isinstance(enriched.get("detailed_stats"), Mapping)
+            and enriched["detailed_stats"].get("quality", {}).get("valid")
+            is True
+        )
+        if detailed_stats is not None and not existing_details_complete:
+            enriched = attach_tournament_detailed_stats(
+                enriched,
+                detailed_stats,
+            )
+            existing_details_complete = bool(
+                isinstance(enriched.get("detailed_stats"), Mapping)
+                and enriched["detailed_stats"].get("quality", {}).get("valid")
+                is True
+            )
+            changed = True
+            log(
+                "[TOURNAMENT_RESULTS] Enriched the retained Tournament summary "
+                "from the causally bound terminal player save",
+                "INFO",
+                console=True,
+            )
+        if changed:
+            try:
+                persist_tournament_result(enriched)
+            except Exception as exc:
+                log(
+                    "[TOURNAMENT_RESULTS] Could not enrich recent result: "
+                    f"{exc}",
+                    "ERROR",
+                    console=True,
+                )
+                return None
+            else:
+                existing = enriched
+        else:
+            existing = enriched
+        if (
+            existing_details_complete
+            or not allow_ui_fallback
+            or changed
+        ):
+            log(
+                "[TOURNAMENT_RESULTS] Current summary already matches recent "
+                f"result {existing.get('tournament_id')}; "
+                + (
+                    "detailed capture is complete"
+                    if existing_details_complete
+                    else "one enrichment was saved; remaining detail work "
+                    "will use a fresh observation"
+                    if changed
+                    else "UI enrichment remains deferred while input is paused"
+                ),
+                "INFO",
+                console=True,
+            )
+            _record_tournament_mapping_observations(
+                existing,
+                mapping_observation_fn,
+                observed_at=when,
+            )
+            return existing
+
+    if detailed_stats is None and allow_ui_fallback:
         log(
             "[TOURNAMENT_RESULTS] Save-backed Round Stats unavailable "
             f"({detailed_reason}); using verified More Stats fallback",
+            "INFO",
+        )
+    elif detailed_stats is None:
+        log(
+            "[TOURNAMENT_RESULTS] Save-backed Round Stats unavailable "
+            f"({detailed_reason}); More Stats enrichment is deferred while "
+            "ordinary input is paused",
             "INFO",
         )
     detail_tap_kwargs: dict[str, Any] = {
@@ -165,7 +219,7 @@ def handle_tournament_results(
     }
     if action_guard_fn is not None:
         detail_tap_kwargs["action_guard_fn"] = action_guard_fn
-    if detailed_stats is None and tap_if_visible(
+    if detailed_stats is None and allow_ui_fallback and tap_if_visible(
         "buttons.more_stats:tournament",
         **detail_tap_kwargs,
     ):
@@ -206,18 +260,37 @@ def handle_tournament_results(
                         detailed_reason += ":summary_not_restored"
 
     try:
-        record = build_tournament_result(
-            summary,
-            clipboard_text,
-            detailed_stats=detailed_stats,
-            detailed_reason=detailed_reason,
-            tournament_id=result_id,
-            captured_at=when,
-            strategy_name=strategy_name,
-            run_configuration=run_configuration,
-            runtime_context=context,
-            battle_conditions=battle_conditions,
-        )
+        if existing is not None:
+            if detailed_stats is None and clipboard_text:
+                detailed_stats = parse_more_stats_clipboard(clipboard_text)
+            record = (
+                attach_tournament_detailed_stats(existing, detailed_stats)
+                if detailed_stats is not None
+                else existing
+            )
+            if (
+                not tournament_conditions_complete(
+                    record.get("battle_conditions")
+                )
+                and tournament_conditions_complete(battle_conditions)
+            ):
+                record = attach_tournament_conditions(
+                    record,
+                    battle_conditions,
+                )
+        else:
+            record = build_tournament_result(
+                summary,
+                clipboard_text,
+                detailed_stats=detailed_stats,
+                detailed_reason=detailed_reason,
+                tournament_id=result_id,
+                captured_at=when,
+                strategy_name=strategy_name,
+                run_configuration=run_configuration,
+                runtime_context=context,
+                battle_conditions=battle_conditions,
+            )
         _record_tournament_mapping_observations(
             record,
             mapping_observation_fn,
