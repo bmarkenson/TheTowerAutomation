@@ -13,9 +13,11 @@ from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime, timezone
+from decimal import Decimal
 import fcntl
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -1060,8 +1062,27 @@ def _mapping_candidate_status_item(
     candidate = record["candidate"]
     candidate_status = candidate["status"]
     if candidate_status == "needs_more_evidence":
-        state = "more_evidence_required"
-        reason = candidate["reason"]
+        target_states = (
+            [
+                _candidate_state_in_mapping(
+                    candidate,
+                    mappings.get(mapping_id),
+                )
+                for mapping_id in _candidate_target_mapping_ids(
+                    candidate,
+                    mapping,
+                )
+            ]
+            if mapping["resolution"]
+            in {"exact", "compatible_exact_revision"}
+            else []
+        )
+        if target_states and all(value == "match" for value in target_states):
+            state = "integrated"
+            reason = "canonical mapping already contains the observed pairing"
+        else:
+            state = "more_evidence_required"
+            reason = candidate["reason"]
     elif candidate_status == "ambiguous":
         state = "evidence_ambiguous"
         reason = candidate["reason"]
@@ -1183,7 +1204,87 @@ def _candidate_state_in_mapping(
         ):
             return "conflict"
         return "absent"
+    if kind == "orb_distance_calibration":
+        return _orb_distance_candidate_state(candidate, mapping)
     return "unsupported"
+
+
+def _orb_distance_candidate_state(
+    candidate: Mapping[str, Any],
+    mapping: Mapping[str, Any],
+) -> str:
+    """Compare one paired field receipt with a complete canonical Orb tuple."""
+
+    spec = mapping.get("orb_distance")
+    if not isinstance(spec, Mapping):
+        return "missing"
+    source_fields = spec.get("source_fields")
+    tolerance = spec.get("raw_float_tolerance")
+    values = spec.get("values")
+    expected_fields = {
+        "innerOrbDistance": "extra",
+        "workshopOrbDistance": "workshop",
+    }
+    field = str(candidate["scope"].get("field") or "")
+    component = expected_fields.get(field)
+    attack_range = str(candidate["scope"].get("attack_range") or "")
+    observed_values = candidate.get("observed_semantic_values")
+    raw_value = candidate["raw_discriminator"]["value"]
+    if (
+        not isinstance(source_fields, Mapping)
+        or dict(source_fields)
+        != {"extra": "innerOrbDistance", "workshop": "workshopOrbDistance"}
+        or component is None
+        or candidate.get("locator") != field
+        or not attack_range
+        or isinstance(tolerance, bool)
+        or not isinstance(tolerance, float)
+        or not math.isfinite(tolerance)
+        or tolerance <= 0.0
+        or not isinstance(values, list)
+        or not values
+        or not isinstance(observed_values, list)
+        or len(observed_values) != 2
+        or isinstance(raw_value, bool)
+        or not isinstance(raw_value, float)
+        or not math.isfinite(raw_value)
+    ):
+        return "missing"
+
+    tolerance_decimal = Decimal(str(tolerance))
+    conflict = False
+    for option in values:
+        raw = option.get("raw") if isinstance(option, Mapping) else None
+        value = option.get("value") if isinstance(option, Mapping) else None
+        if (
+            not isinstance(raw, Mapping)
+            or set(raw) != {"extra", "workshop"}
+            or not isinstance(value, Mapping)
+            or set(value) != {"range_basis", "extra", "workshop"}
+        ):
+            return "missing"
+        raw_center = raw.get(component)
+        if (
+            isinstance(raw_center, bool)
+            or not isinstance(raw_center, float)
+            or not math.isfinite(raw_center)
+        ):
+            return "missing"
+        if value.get("range_basis") != attack_range:
+            continue
+        if (
+            abs(Decimal(str(raw_value)) - Decimal(str(raw_center)))
+            > tolerance_decimal
+        ):
+            continue
+        expected_values = [value.get("extra"), value.get("workshop")]
+        if (
+            value.get(component) == candidate.get("semantic_value")
+            and observed_values == expected_values
+        ):
+            return "match"
+        conflict = True
+    return "conflict" if conflict else "absent"
 
 
 def _module_identity_pairs(

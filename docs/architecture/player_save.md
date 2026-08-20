@@ -1044,6 +1044,13 @@ next action, and a selectable/copyable request that tells an agent which
 durable receipt, mapping, check, state, and blocker to inspect. The GUI never
 launches or grants authority to an agent itself.
 
+When ordinary development review adds a complete Orb Distance tuple, the
+catalog recognizes a supporting field receipt as integrated only after its
+calculated Range, complete ordered UI tuple, raw field value, canonical
+tolerance, and both compatible mapping owners agree. The repository mapping is
+the authority; this status check neither promotes nor disposes the receipt.
+An absent or differing owner keeps the original agent-review state.
+
 Server revision 45 adds `save_mapping_machine_verification_v1` and
 `save_mapping_automatic_promotion_v1`. A `battle_history_killed_by_id`
 candidate is machine-verified only when it is deterministic and exact-locator,
