@@ -62,8 +62,15 @@ class PerkSaveMonitor:
         context: PerkSaveMonitorContext,
         *,
         new_activity: bool = False,
+        verified_target_handoff: bool = False,
     ) -> bool:
-        """Bind one owned activity, resetting only at an explicit new boundary."""
+        """Bind one owned activity or one proved same-battle destination.
+
+        A verified target handoff deliberately discards the old target's
+        snapshot before the destination's forced bundle is observed. The
+        caller owns the independent same-battle continuity proof; ordinary
+        target changes remain rejected.
+        """
 
         if not isinstance(context, PerkSaveMonitorContext) or not context.valid():
             return False
@@ -72,6 +79,16 @@ class PerkSaveMonitor:
             self._context = context
             return True
         if current == context:
+            return True
+        if (
+            verified_target_handoff
+            and current.runtime_session_id == context.runtime_session_id
+            and current.active_round_identity_fingerprint
+            == context.active_round_identity_fingerprint
+            and current.target_binding != context.target_binding
+        ):
+            self._reset_evidence()
+            self._context = context
             return True
         if (
             new_activity

@@ -542,6 +542,64 @@ def test_bound_checkpoint_accessor_retains_positive_prefix_after_later_failure()
     assert monitor.bound_checkpoint_evidence(_context(generation=9)) is None
 
 
+def test_verified_target_handoff_reseeds_from_destination_for_same_battle():
+    monitor = PerkSaveMonitor()
+    source = _context(generation=4)
+    destination = _context(generation=5)
+    source_picks = (
+        _pick(1, 100, 1, "max_health"),
+        _pick(2, 200, 2, "damage"),
+    )
+    destination_picks = source_picks[:1]
+
+    assert _observe(
+        monitor,
+        _runtime(10, saved_wave=220, picks=source_picks),
+        context=source,
+        acquisition_type=PlayerSaveAcquisitionType.FORCED_SERIALIZATION,
+    ) == "initial_complete_prefix"
+    assert not monitor.bind_context(destination)
+
+    assert monitor.bind_context(
+        destination,
+        verified_target_handoff=True,
+    )
+    assert _observe(
+        monitor,
+        _runtime(11, saved_wave=180, picks=destination_picks),
+        context=destination,
+        acquisition_type=PlayerSaveAcquisitionType.FORCED_SERIALIZATION,
+    ) == "initial_complete_prefix"
+
+    evidence = monitor.terminal_evidence(
+        context=destination,
+        terminal_state="GAME_OVER",
+    )
+    assert evidence["context_status"] == "bound"
+    assert evidence["checkpoint"]["picked_count"] == 1
+    assert evidence["checkpoint"]["picks"] == [
+        {
+            "sequence": 1,
+            "saved_wave": 100,
+            "perk_id": 1,
+            "perk_key": "max_health",
+            "level_after": 1,
+            "source": "exact_saved_pick",
+        }
+    ]
+    assert evidence["active_failure_reason"] is None
+
+
+def test_verified_target_handoff_cannot_change_battle_identity():
+    monitor = PerkSaveMonitor()
+    assert monitor.bind_context(_context(generation=4))
+
+    assert not monitor.bind_context(
+        _context(generation=5, identity="b" * 64),
+        verified_target_handoff=True,
+    )
+
+
 def test_post_exhaustion_checkpoint_and_terminal_window_close_exact_inventory():
     evidence = _qualified_monitoring()
 

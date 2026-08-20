@@ -1350,6 +1350,7 @@ class App:
         *,
         relation: BattleIdentityRelation,
         identity_fingerprint: str,
+        verified_target_handoff: bool = False,
     ) -> None:
         """Fan out one force-bound save without reacquiring it for projections."""
 
@@ -1374,6 +1375,7 @@ class App:
             context=context,
             reason_code="forced_battle_identity",
             bind_new_activity=(relation is not BattleIdentityRelation.SAME_BATTLE),
+            verified_target_handoff=verified_target_handoff,
         )
 
         workflow = getattr(
@@ -1526,6 +1528,9 @@ class App:
         manager_was_active = bool(
             self._mission_mgr.active_battle_observed()
         )
+        handoff_guard_was_pending = bool(
+            getattr(self, "_emulator_handoff_guard_pending", False)
+        )
         result = coordinator.bind(
             context=context,
             action_guard_fn=lambda: self._runtime_action_guard(
@@ -1629,6 +1634,11 @@ class App:
             )
             if not self._emulator_handoff_guard_pending:
                 self._emulator_handoff_guard_warning_logged = False
+            verified_target_handoff = bool(
+                handoff_guard_was_pending
+                and result.relation is BattleIdentityRelation.SAME_BATTLE
+                and not self._emulator_handoff_guard_pending
+            )
             save_coordinator = getattr(
                 self,
                 "_player_save_preflight_coordinator",
@@ -1663,11 +1673,19 @@ class App:
                         f"refresh failed safely: {exc}",
                         "DEBUG",
                     )
-            self._publish_forced_battle_identity_bundle(
-                result.acquisition,
-                relation=result.relation,
-                identity_fingerprint=result.identity.fingerprint,
-            )
+            if verified_target_handoff:
+                self._publish_forced_battle_identity_bundle(
+                    result.acquisition,
+                    relation=result.relation,
+                    identity_fingerprint=result.identity.fingerprint,
+                    verified_target_handoff=True,
+                )
+            else:
+                self._publish_forced_battle_identity_bundle(
+                    result.acquisition,
+                    relation=result.relation,
+                    identity_fingerprint=result.identity.fingerprint,
+                )
             log_result(
                 "Active battle identity bound from the forced save",
                 detail=(
@@ -1867,6 +1885,7 @@ class App:
         reason_code: str,
         observe_perks: bool = True,
         bind_new_activity: bool = False,
+        verified_target_handoff: bool = False,
     ) -> None:
         """Deliver one immutable parsed bundle to every eligible consumer."""
 
@@ -1900,15 +1919,23 @@ class App:
             with self._perk_save_monitor_guard():
                 if monitor is not None:
                     try:
+                        if verified_target_handoff:
+                            self._pending_perk_timeline_save_checkpoint = None
                         perk_bound = bool(
-                            not bind_new_activity
+                            not (
+                                bind_new_activity
+                                or verified_target_handoff
+                            )
                             or monitor.bind_context(
                                 context,
-                                new_activity=True,
+                                new_activity=bind_new_activity,
+                                verified_target_handoff=(
+                                    verified_target_handoff
+                                ),
                             )
                         )
                         if perk_bound and observe_perks:
-                            monitor.observe_bundle(
+                            disposition = monitor.observe_bundle(
                                 acquisition,
                                 context=context,
                             )
@@ -1916,6 +1943,14 @@ class App:
                                 monitor,
                                 context,
                             )
+                            if verified_target_handoff:
+                                log(
+                                    "[PLAYER_SAVE_API] Rebound Perk save "
+                                    "monitoring from the verified same-battle "
+                                    "emulator destination: "
+                                    f"{disposition}",
+                                    "INFO",
+                                )
                     except Exception:
                         log(
                             "[PLAYER_SAVE_API] Perk projection rejected one "

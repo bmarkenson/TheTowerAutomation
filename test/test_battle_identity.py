@@ -1696,6 +1696,70 @@ def test_running_start_binds_forced_identity_before_completion(tmp_path):
     )
 
 
+def test_verified_same_battle_handoff_rebinds_destination_perk_bundle():
+    app = App.__new__(App)
+    app._supervisor = Mock(is_paused=False)
+    app._supervisor.battle_workflow = None
+    app._supervisor.manual_control = None
+    app._supervisor.manual_control_error = False
+    app._supervisor.battle_workflow_error = False
+    app._supervisor.setup_capture_error = False
+    app._supervisor.setup_capture = None
+    app._awaiting_initial_battle_intent = Mock(return_value=False)
+    app._mission_mgr = Mock()
+    app._mission_mgr.active_battle_observed.return_value = True
+    app._mission_mgr.observe_active_round_identity.return_value = False
+    app._player_save_runtime_session_id = "runtime-1"
+    app._adb_target_session = SimpleNamespace(
+        snapshot=lambda: SimpleNamespace(
+            target="localhost:5555",
+            generation=8,
+            owned=True,
+        )
+    )
+    identity = _identity()
+    acquisition = _acquisition(identity, target_generation=8)
+    app._battle_identity_coordinator = Mock()
+    app._battle_identity_coordinator.bind.return_value = (
+        BattleIdentityCheckResult(
+            BattleIdentityCheckStatus.COMPLETE,
+            "active_round_identity_bound",
+            identity=identity,
+            relation=BattleIdentityRelation.SAME_BATTLE,
+            acquisition=acquisition,
+            source_restored=True,
+            lifecycle_input_attempted=True,
+        )
+    )
+    app._battle_identity_store = Mock()
+    app._battle_identity_store.active.return_value = SimpleNamespace(
+        emulator_handoff_guard=None,
+    )
+    app._player_save_preflight_coordinator = Mock()
+    app._update_action_authority = Mock()
+    app._runtime_action_guard = Mock(return_value=True)
+    app._publish_forced_battle_identity_bundle = Mock()
+    app._control_observation = {
+        "game_state": "active_battle",
+        "active_battle": True,
+    }
+    app._observed_active_round_identity_fingerprint = identity.fingerprint
+    app._active_round_identity_fingerprint = identity.fingerprint
+    app._battle_identity_reconciliation_required = True
+    app._emulator_handoff_guard_pending = True
+    app._emulator_handoff_guard_warning_logged = True
+
+    assert app._force_battle_identity({"state": "RUNNING"}, object())
+
+    app._publish_forced_battle_identity_bundle.assert_called_once_with(
+        acquisition,
+        relation=BattleIdentityRelation.SAME_BATTLE,
+        identity_fingerprint=identity.fingerprint,
+        verified_target_handoff=True,
+    )
+    assert app._emulator_handoff_guard_pending is False
+
+
 def test_home_resume_dispatch_makes_identity_non_authoritative_until_running():
     app = App.__new__(App)
     retained = object()

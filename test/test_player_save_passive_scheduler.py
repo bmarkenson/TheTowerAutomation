@@ -442,6 +442,43 @@ def test_app_fans_one_passive_bundle_to_perks_metrics_and_optional_audit():
     )
 
 
+def test_verified_handoff_rebinds_perks_before_destination_observation():
+    app = App.__new__(App)
+    context = _context(generation=4)
+    acquisition = Mock()
+    app._perk_save_monitor = Mock()
+    app._perk_save_monitor.bind_context.return_value = True
+    app._perk_save_monitor.observe_bundle.return_value = (
+        "initial_complete_prefix"
+    )
+    app._perk_save_monitor.bound_checkpoint_evidence.return_value = None
+    app._active_run_metric_monitor = None
+    app._battle_activation_tracker = Mock()
+    app._player_save_audit_collector = None
+    app._pending_perk_timeline_save_checkpoint = (
+        _context(generation=3),
+        {"schema_version": 1},
+    )
+
+    app._publish_player_save_observation(
+        acquisition,
+        context=context,
+        reason_code="forced_battle_identity",
+        verified_target_handoff=True,
+    )
+
+    app._perk_save_monitor.bind_context.assert_called_once_with(
+        context,
+        new_activity=False,
+        verified_target_handoff=True,
+    )
+    app._perk_save_monitor.observe_bundle.assert_called_once_with(
+        acquisition,
+        context=context,
+    )
+    assert app._pending_perk_timeline_save_checkpoint is None
+
+
 def test_app_projects_current_economy_checkpoint_off_battle_screen():
     app = App.__new__(App)
     context = _context()
