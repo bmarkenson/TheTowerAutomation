@@ -17,7 +17,13 @@ from core.battle_stats import (
 )
 from core.battle_lifecycle import HomeBattleControl
 from core.home_battle import detect_home_battle_control
-from core.input import TapVerification, safe_tap, tap_if_visible
+from core.input import (
+    TapDispatchOutcome,
+    TapDispatchStatus,
+    TapVerification,
+    safe_tap,
+    tap_if_visible,
+)
 from core.label_tapper import is_visible
 from core.ss_capture import capture_adb_screenshot
 from core.state_detector import detect_state_and_overlays
@@ -292,44 +298,98 @@ def dismiss_tournament_results_to_home(
     capture_fn: Callable[[], Optional[Frame]] = capture_adb_screenshot,
     sleep_fn: Callable[[float], None] = time.sleep,
 ) -> bool:
-    """Dismiss the exact Tournament ``OK`` target and verify New Battle Home."""
+    """Leave Tournament Results and its section for ordinary New Battle Home."""
 
     frame = capture_fn()
-    if not _tournament_ok_visible(frame):
+    if frame is None:
         log(
-            "[TOURNAMENT_RESULTS] Verified Tournament OK target is unavailable",
+            "[TOURNAMENT_RESULTS] A fresh terminal route frame is unavailable",
             "ERROR",
             console=True,
         )
         return False
-    verification = TapVerification(
-        screenshot=frame,
-        target_region=TOURNAMENT_OK_REGION,
-        description="Tournament Results OK button",
-        verifier=_tournament_ok_visible,
-    )
-    if not safe_tap(
-        TOURNAMENT_OK_POINT,
-        screenshot=frame,
-        verification=verification,
-        log_label="buttons.ok:tournament_results",
-        action_guard_fn=action_guard_fn,
+    initial_state = str(
+        detect_state_and_overlays(frame).get("state") or ""
+    ).upper()
+    if (
+        initial_state in {"HOME", "HOME_SCREEN"}
+        and detect_home_battle_control(frame).control
+        is HomeBattleControl.NEW_BATTLE
     ):
+        return True
+    if _tournament_ok_visible(frame):
+        verification = TapVerification(
+            screenshot=frame,
+            target_region=TOURNAMENT_OK_REGION,
+            description="Tournament Results OK button",
+            verifier=_tournament_ok_visible,
+        )
+        if not safe_tap(
+            TOURNAMENT_OK_POINT,
+            screenshot=frame,
+            verification=verification,
+            log_label="buttons.ok:tournament_results",
+            action_guard_fn=action_guard_fn,
+        ):
+            return False
+    elif initial_state != "TOURNAMENT_SCREEN":
+        log(
+            "[TOURNAMENT_RESULTS] Verified Tournament terminal route is unavailable",
+            "ERROR",
+            console=True,
+        )
         return False
 
     deadline = time.monotonic() + max(0.0, float(timeout_s))
+    return_to_game_dispatched = False
     while time.monotonic() <= deadline:
         current = capture_fn()
         if current is not None:
             detection = detect_state_and_overlays(current)
-            if (
-                str(detection.get("state") or "").upper()
-                in {"HOME", "HOME_SCREEN"}
-                and detect_home_battle_control(current).control
+            state = str(detection.get("state") or "").upper()
+            if state in {"HOME", "HOME_SCREEN"} and (
+                detect_home_battle_control(current).control
                 is HomeBattleControl.NEW_BATTLE
             ):
                 return True
+            if state == "TOURNAMENT_SCREEN" and not return_to_game_dispatched:
+                raw_outcome = tap_if_visible(
+                    "buttons.return_to_game",
+                    screenshot=current,
+                    retries=0,
+                    failure_log_level="DEBUG",
+                    action_guard_fn=action_guard_fn,
+                    return_dispatch_outcome=True,
+                )
+                outcome = (
+                    raw_outcome
+                    if isinstance(raw_outcome, TapDispatchOutcome)
+                    else TapDispatchOutcome(
+                        TapDispatchStatus.DISPATCHED
+                        if raw_outcome
+                        else TapDispatchStatus.NOT_DISPATCHED
+                    )
+                )
+                if outcome.uncertain:
+                    log(
+                        "[TOURNAMENT_RESULTS] Return-to-Game dispatch outcome "
+                        "is uncertain; the route will not repeat the input",
+                        "ERROR",
+                        console=True,
+                    )
+                    return False
+                return_to_game_dispatched = outcome.dispatched
         sleep_fn(0.5)
+    destination = (
+        "ordinary Home after Return-to-Game"
+        if return_to_game_dispatched
+        else "the verified Tournament Return-to-Game control"
+    )
+    log(
+        f"[TOURNAMENT_RESULTS] Timed out waiting for {destination}",
+        "ERROR",
+        console=True,
+    )
     return False
 
 
