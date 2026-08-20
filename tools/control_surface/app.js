@@ -16,6 +16,10 @@ const state = {
   saveMappingResult: null,
   saveMappingBusy: false,
   saveMappingSelectionGeneration: 0,
+  cellPolicyDirty: false,
+  cellPolicyLoaded: false,
+  cellPolicyRequestId: null,
+  cellPolicySaving: false,
 };
 
 const byId = (id) => document.getElementById(id);
@@ -23,6 +27,8 @@ const dash = "—";
 const BETTER_CONTROL_MINIMUM_REVISION = 30;
 const BETTER_CONTROL_CAPABILITY = "better_control_model_v2";
 const SETUP_CAPTURE_CAPABILITY = "save_backed_setup_capture_v2";
+const LAB_SPEED_PLANNER_CAPABILITY = "lab_speed_reserve_planner_v1";
+const LAB_SPEED_OPTIONS = ["1", "1.5", "2", "3", "4", "5", "6", "7", "8"];
 const clientModel = globalThis.TheTowerControlClientModel;
 
 function authHeaders() {
@@ -91,6 +97,242 @@ function formatRemaining(seconds) {
   return `${secs}s remaining`;
 }
 
+function formatCells(value, { signed = false } = {}) {
+  if (value == null || value === "") return dash;
+  const number = Number(value);
+  if (!Number.isFinite(number)) return dash;
+  const absolute = Math.abs(number);
+  const magnitudes = [
+    [1e33, "D"], [1e30, "N"], [1e27, "O"], [1e24, "S"],
+    [1e21, "s"], [1e18, "Q"], [1e15, "q"], [1e12, "T"],
+    [1e9, "B"], [1e6, "M"], [1e3, "K"],
+  ];
+  const magnitude = magnitudes.find(([threshold]) => absolute >= threshold);
+  const scaled = magnitude ? absolute / magnitude[0] : absolute;
+  const rendered = scaled.toLocaleString(undefined, {
+    maximumFractionDigits: scaled >= 100 ? 0 : 2,
+  }) + (magnitude?.[1] || "");
+  if (number < 0) return `-${rendered}`;
+  return signed && number > 0 ? `+${rendered}` : rendered;
+}
+
+function projectionLabel(plan) {
+  if (!plan?.complete) return "Choose all Labs";
+  const burn = formatCells(plan.burn_per_hour_decimal);
+  const net = formatCells(plan.projected_net_per_hour_decimal, { signed: true });
+  return `${burn}/h · ${net === dash ? "net pending" : `${net}/h net`}`;
+}
+
+function populateLabSpeedOptions() {
+  document.querySelectorAll("#labPolicyRows select").forEach((select) => {
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = "Choose…";
+    select.append(placeholder);
+    for (const speed of LAB_SPEED_OPTIONS) {
+      const option = document.createElement("option");
+      option.value = speed;
+      option.textContent = speed === "1" ? "1× — no renewal" : `${speed}×`;
+      select.append(option);
+    }
+  });
+}
+
+function loadCellPolicyForm(policy) {
+  byId("cellReserveFloor").value = policy?.buffer_floor_decimal || "";
+  const labs = new Map((policy?.labs || []).map((item) => [Number(item.lab), item]));
+  document.querySelectorAll("#labPolicyRows tr[data-lab]").forEach((row) => {
+    const item = labs.get(Number(row.dataset.lab));
+    row.querySelector('select[data-plan="normal"]').value = item?.normal_speed || "";
+    row.querySelector('select[data-plan="reserve"]').value = item?.reserve_speed || "";
+  });
+  state.cellPolicyLoaded = true;
+  state.cellPolicyRequestId = policy?.request_id || null;
+}
+
+function cellPolicyDraft() {
+  const labs = [];
+  let valid = true;
+  document.querySelectorAll("#labPolicyRows tr[data-lab]").forEach((row) => {
+    const normal = row.querySelector('select[data-plan="normal"]').value;
+    const reserve = row.querySelector('select[data-plan="reserve"]').value;
+    if ((!normal && reserve) || (normal && !reserve) || (normal && Number(reserve) > Number(normal))) {
+      valid = false;
+    }
+    labs.push({
+      lab: Number(row.dataset.lab),
+      normal_speed: normal || null,
+      reserve_speed: reserve || null,
+    });
+  });
+  const floor = byId("cellReserveFloor").value.trim();
+  if (floor && (floor.length > 36 || !/^[0-9]+$/.test(floor))) valid = false;
+  return { valid, buffer_floor_decimal: floor || null, labs };
+}
+
+function draftProjection(labs, field, costs, gross) {
+  if (!costs || labs.some((item) => !item[field])) return null;
+  const burn = labs.reduce(
+    (total, item) => total + Number(costs[item[field]]),
+    0,
+  );
+  return {
+    complete: true,
+    burn_per_hour_decimal: String(burn),
+    projected_net_per_hour_decimal: Number.isFinite(gross)
+      ? String(gross - burn)
+      : null,
+  };
+}
+
+function renderCellPolicyDraft() {
+  const plan = state.lastStatus?.lab_speed_plan;
+  if (!plan) return;
+  const draft = cellPolicyDraft();
+  const costs = plan.cost_model?.cells_per_hour_by_speed;
+  const grossText = plan.income?.cells_per_hour_decimal;
+  const gross = grossText == null ? Number.NaN : Number(grossText);
+  const normal = draftProjection(draft.labs, "normal_speed", costs, gross);
+  const reserve = draftProjection(draft.labs, "reserve_speed", costs, gross);
+  const actualNetText = plan.actual_balance_net_per_hour_decimal;
+  const actualNet = actualNetText == null ? Number.NaN : Number(actualNetText);
+  const currentBalanceText = state.lastStatus?.control_model?.cell_balance?.balance_decimal;
+  const currentBalance = currentBalanceText == null
+    ? Number.NaN
+    : Number(currentBalanceText);
+  const floor = draft.buffer_floor_decimal == null
+    ? Number.NaN
+    : Number(draft.buffer_floor_decimal);
+  for (const item of draft.labs) {
+    const row = document.querySelector(`#labPolicyRows tr[data-lab="${item.lab}"]`);
+    const normalCost = costs?.[item.normal_speed];
+    const reserveCost = costs?.[item.reserve_speed];
+    row.querySelector('[data-cost="normal"]').textContent = normalCost == null
+      ? dash : `${formatCells(normalCost)}/h`;
+    row.querySelector('[data-cost="reserve"]').textContent = reserveCost == null
+      ? dash : `${formatCells(reserveCost)}/h`;
+    row.querySelector('[data-cost="savings"]').textContent = normalCost == null || reserveCost == null
+      ? dash : `${formatCells(Number(normalCost) - Number(reserveCost))}/h`;
+  }
+  setText("plannerNormalProjection", projectionLabel(normal));
+  setText("plannerReserveProjection", projectionLabel(reserve));
+  const recommendation = byId("labPlannerRecommendation");
+  if (!draft.valid) {
+    recommendation.className = "callout warning";
+    recommendation.textContent = "For each Lab, choose both targets or leave both blank; keep reserve at or below normal and enter a whole-number Cell reserve.";
+  } else if (!normal || !reserve) {
+    recommendation.className = "callout info";
+    recommendation.textContent = "The Cell reserve can be saved now. Complete both targets for all five Labs to add the spending forecast.";
+  } else if (!Number.isFinite(gross)) {
+    recommendation.className = "callout info";
+    recommendation.textContent = "The plan is complete; a projected net will appear when completed-battle Cell history is available.";
+  } else if (Number(reserve.projected_net_per_hour_decimal) < 0) {
+    recommendation.className = "callout warning";
+    recommendation.textContent = "Draft reserve targets still spend faster than historical gross Cell income.";
+  } else if (Number.isFinite(currentBalance) && Number.isFinite(floor) && currentBalance <= floor) {
+    recommendation.className = "callout warning";
+    recommendation.textContent = "The observed Cell balance is at or below this draft reserve; review the reserve targets before the next renewals.";
+  } else if (Number(normal.projected_net_per_hour_decimal) >= 0 && Number.isFinite(actualNet) && actualNet < 0) {
+    recommendation.className = "callout warning";
+    recommendation.textContent = "Historical income covers the draft normal plan, but the observed Cell balance is currently falling.";
+  } else if (Number.isFinite(actualNet) && actualNet < 0) {
+    recommendation.className = "callout warning";
+    recommendation.textContent = "The observed Cell balance is falling; the draft reserve targets are projected to make Cell flow nonnegative.";
+  } else if (Number(normal.projected_net_per_hour_decimal) >= 0) {
+    recommendation.className = "callout success";
+    recommendation.textContent = "Draft normal targets are covered by historical gross Cell income.";
+  } else if (Number(reserve.projected_net_per_hour_decimal) >= 0) {
+    recommendation.className = "callout success";
+    recommendation.textContent = "Draft reserve targets change projected Cell flow from declining to nonnegative.";
+  }
+  setText("cellPolicyStatus", "Unsaved changes · planner only");
+  byId("saveCellPolicyButton").disabled = !draft.valid || state.cellPolicySaving;
+}
+
+function renderCellPlanner(payload) {
+  const compatible = payload.api_version === 1
+    && Number(payload.server_revision) >= 53
+    && (payload.capabilities || []).includes(LAB_SPEED_PLANNER_CAPABILITY);
+  const plan = payload.lab_speed_plan;
+  const saveButton = byId("saveCellPolicyButton");
+  if (!compatible || !plan || plan.schema_version !== 1) {
+    setBadge(byId("labPlannerBadge"), "API update needed", "bad");
+    saveButton.disabled = true;
+    setText("cellPolicyStatus", "Linux API revision 53 with the Lab planner capability is required.");
+    return;
+  }
+
+  const policy = plan.policy || payload.control?.cell_balance_policy;
+  const requestId = policy?.request_id || null;
+  if (!state.cellPolicyDirty && (
+    !state.cellPolicyLoaded || state.cellPolicyRequestId !== requestId
+  )) {
+    loadCellPolicyForm(policy);
+  }
+
+  const balance = payload.control_model?.cell_balance;
+  const floor = policy?.buffer_floor_decimal;
+  setText(
+    "plannerCellBalance",
+    balance?.status === "observed"
+      ? `${formatCells(balance.balance_decimal)}${floor ? ` · ${formatCells(floor)} reserve` : ""}`
+      : floor ? `Not observed · ${formatCells(floor)} reserve` : "Not observed",
+  );
+  setText(
+    "plannerActualNet",
+    plan.actual_balance_net_per_hour_decimal == null
+      ? "Collecting"
+      : `${formatCells(plan.actual_balance_net_per_hour_decimal, { signed: true })}/h`,
+  );
+  setText(
+    "plannerHistoricalGross",
+    plan.income?.status === "observed"
+      ? `${formatCells(plan.income.cells_per_hour_decimal)}/h · ${plan.income.sample_count} battle${plan.income.sample_count === 1 ? "" : "s"}`
+      : "No usable history",
+  );
+  setText("plannerNormalProjection", projectionLabel(plan.normal_plan));
+  setText("plannerReserveProjection", projectionLabel(plan.reserve_plan));
+
+  for (const item of policy?.labs || []) {
+    const row = document.querySelector(`#labPolicyRows tr[data-lab="${item.lab}"]`);
+    if (!row) continue;
+    row.querySelector('[data-cost="normal"]').textContent = item.normal_cells_per_hour_decimal == null
+      ? dash : `${formatCells(item.normal_cells_per_hour_decimal)}/h`;
+    row.querySelector('[data-cost="reserve"]').textContent = item.reserve_cells_per_hour_decimal == null
+      ? dash : `${formatCells(item.reserve_cells_per_hour_decimal)}/h`;
+    row.querySelector('[data-cost="savings"]').textContent = item.savings_per_hour_decimal == null
+      ? dash : `${formatCells(item.savings_per_hour_decimal)}/h`;
+  }
+
+  const recommendation = byId("labPlannerRecommendation");
+  const recommendationStatus = plan.recommendation?.status || "policy_incomplete";
+  const recommendationWarning = [
+    "reserve_plan_still_declines",
+    "reserve_floor_breached",
+    "observed_decline_despite_forecast",
+    "observed_decline_reserve_plan_recovers",
+  ].includes(recommendationStatus);
+  recommendation.className = `callout ${
+    recommendationWarning ? "warning"
+      : recommendationStatus === "policy_incomplete" || recommendationStatus === "income_history_unavailable" ? "info"
+        : "success"
+  }`;
+  recommendation.textContent = plan.recommendation?.reason || "Complete the Lab plan.";
+  setBadge(
+    byId("labPlannerBadge"),
+    plan.status === "ready" ? "Planner ready" : plan.status === "invalid_policy" ? "Policy invalid" : "Plan incomplete",
+    plan.status === "ready" ? "good" : plan.status === "invalid_policy" ? "bad" : "warn",
+  );
+  setText(
+    "cellPolicyStatus",
+    policy?.updated_at
+      ? `Saved ${formatDate(policy.updated_at)} · automatic application disabled`
+      : "No Lab plan saved yet · automatic application disabled",
+  );
+  saveButton.disabled = state.cellPolicySaving || plan.status !== "ready";
+  if (state.cellPolicyDirty) renderCellPolicyDraft();
+}
+
 function formatPriorTransition(observation) {
   if (!observation) return "No earlier state transition in the current log tail";
   const wave = observation.wave == null ? "" : ` · wave ${observation.wave}`;
@@ -107,6 +349,7 @@ function renderStatus(payload) {
   const directive = control.state || "UNKNOWN";
 
   renderConfirmedLocalMapping(payload.confirmed_local_mappings);
+  renderCellPlanner(payload);
 
   setText("directiveState", directive);
   byId("directiveState").className = `state-pill ${directive.toLowerCase()}`;
@@ -1598,6 +1841,38 @@ async function sendControl(payload, successMessage) {
   }
 }
 
+async function saveCellPolicy() {
+  const draft = cellPolicyDraft();
+  if (!draft.valid) {
+    renderCellPolicyDraft();
+    toast("Choose complete Lab pairs and enter a valid whole-number reserve", true);
+    return;
+  }
+  state.cellPolicySaving = true;
+  byId("saveCellPolicyButton").disabled = true;
+  try {
+    const response = await api("/api/v1/control", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "cell_balance_policy",
+        buffer_floor_decimal: draft.buffer_floor_decimal,
+        labs: draft.labs,
+      }),
+    });
+    state.cellPolicyDirty = false;
+    state.cellPolicyLoaded = false;
+    renderStatus(response);
+    toast("Cell reserve and Lab plan saved; automatic application remains disabled");
+    await refresh();
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    state.cellPolicySaving = false;
+    if (state.lastStatus) renderCellPlanner(state.lastStatus);
+  }
+}
+
 async function sendProcess(payload, successMessage) {
   setControlsBusy(true);
   try {
@@ -1618,7 +1893,7 @@ async function sendProcess(payload, successMessage) {
 }
 
 function setControlsBusy(busy) {
-  document.querySelectorAll("[data-control-action], [data-process-action], #applyModeButton, #customPauseForm button, #configureRunButton, #captureSetupButton").forEach((button) => {
+  document.querySelectorAll("[data-control-action], [data-process-action], #applyModeButton, #customPauseForm button, #configureRunButton, #captureSetupButton, #saveCellPolicyButton").forEach((button) => {
     button.disabled = busy;
   });
   if (!busy && state.lastStatus) renderStatus(state.lastStatus);
@@ -1916,6 +2191,19 @@ byId("gameSpeedTargetSelect").addEventListener("change", () => {
   );
 });
 
+byId("cellPolicyForm").addEventListener("input", () => {
+  state.cellPolicyDirty = true;
+  renderCellPolicyDraft();
+});
+byId("cellPolicyForm").addEventListener("change", () => {
+  state.cellPolicyDirty = true;
+  renderCellPolicyDraft();
+});
+byId("cellPolicyForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  saveCellPolicy();
+});
+
 byId("battleRows").addEventListener("click", (event) => {
   const row = event.target.closest("tr[data-battle-id]");
   if (row) openBattle(row.dataset.battleId);
@@ -2028,5 +2316,6 @@ byId("configureRunForm").addEventListener("submit", (event) => {
 });
 byId("refreshButton").addEventListener("click", refresh);
 
+populateLabSpeedOptions();
 refresh();
 state.timer = window.setInterval(refresh, 5000);

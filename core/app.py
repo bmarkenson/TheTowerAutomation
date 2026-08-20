@@ -460,6 +460,7 @@ class App:
         )
         self._cell_balance_buffer_warning_active = False
         self._cell_balance_storage_warning_logged = False
+        self._sync_cell_balance_policy()
         self._player_save_preflight_session_id = ""
         self._player_save_preflight_result = None
         self._player_save_preflight_activity_scope_id = None
@@ -2042,6 +2043,7 @@ class App:
         balance_tracker = getattr(self, "_cell_balance_tracker", None)
         if balance_tracker is None:
             return
+        self._sync_cell_balance_policy()
         try:
             disposition = balance_tracker.observe_bundle(acquisition)
             if disposition == "accepted_observation":
@@ -2061,6 +2063,32 @@ class App:
             log(
                 "[CELL_BALANCE] One shared observation was rejected; other "
                 "save consumers are unaffected",
+                "DEBUG",
+            )
+
+    def _sync_cell_balance_policy(self) -> None:
+        """Apply a valid UI reserve to the tracker without granting input."""
+
+        tracker = getattr(self, "_cell_balance_tracker", None)
+        supervisor = getattr(self, "_supervisor", None)
+        if tracker is None or supervisor is None:
+            return
+        if bool(getattr(supervisor, "cell_balance_policy_error", False)):
+            # Preserve the last known-good reserve rather than treating a
+            # malformed policy as an instruction to clear it.
+            return
+        policy = getattr(supervisor, "cell_balance_policy", None)
+        floor = (
+            getattr(self._config, "cell_buffer_floor", None)
+            if policy is None
+            else policy.get("buffer_floor_decimal")
+        )
+        try:
+            tracker.set_buffer_floor(floor)
+        except (TypeError, ValueError):
+            log(
+                "[CELL_BALANCE] Validated reserve could not be applied to "
+                "the observation tracker",
                 "DEBUG",
             )
 
@@ -4120,6 +4148,7 @@ class App:
         tracker = getattr(self, "_cell_balance_tracker", None)
         if tracker is None:
             return None
+        self._sync_cell_balance_policy()
         try:
             status = tracker.status()
         except Exception:

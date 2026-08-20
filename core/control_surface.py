@@ -74,6 +74,11 @@ from core.host_performance import (
     HostPerformanceStorageError,
     HostPerformanceStore,
 )
+from core.lab_speed_plan import (
+    build_lab_speed_plan_status,
+    empty_cell_balance_policy,
+    historical_cell_income,
+)
 from core.module_presets import ModulePresetConflictError, ModulePresetError
 from core.player_save_setup_capture import (
     SetupCaptureError,
@@ -107,7 +112,7 @@ DEFAULT_STALE_AFTER_SECONDS = 180
 EMULATOR_DEGRADATION_CACHE_SECONDS = 60.0
 # Advance this when a newer Windows client must reload the resident service,
 # and advance that client's MinimumServerRevision in the same change.
-CONTROL_SURFACE_REVISION = 52
+CONTROL_SURFACE_REVISION = 53
 CONTROL_SURFACE_CAPABILITIES = (
     "active_battle_screen_metrics_v1",
     "active_battle_strategy_adoption",
@@ -117,6 +122,7 @@ CONTROL_SURFACE_CAPABILITIES = (
     "better_control_model_v2",
     "bounded_idle_timeout_v1",
     "cell_balance_tracking_v1",
+    "lab_speed_reserve_planner_v1",
     "completed_battle_discard",
     "confirmed_local_mapping_status_v2",
     "current_battle_perks_v1",
@@ -319,6 +325,9 @@ class ControlSurfaceService:
         ] = None
         self._emulator_battle_history_cache: Optional[
             tuple[tuple[int, int], list[dict[str, Any]]]
+        ] = None
+        self._historical_cell_income_cache: Optional[
+            tuple[tuple[tuple[str, int, int], ...], dict[str, Any]]
         ] = None
 
     def strategy_profiles(self) -> dict[str, Any]:
@@ -1397,6 +1406,8 @@ class ControlSurfaceService:
                 "game_speed_target": MAXIMUM_GAME_SPEED_TARGET,
                 "game_speed_target_updated_at": None,
                 "game_speed_target_request_id": None,
+                "cell_balance_policy": empty_cell_balance_policy(),
+                "cell_balance_policy_error": None,
                 "adb_port": None,
                 "resume_at": None,
                 "remaining_seconds": None,
@@ -1517,6 +1528,15 @@ class ControlSurfaceService:
             runtime_authority=strategy_action_gate,
             now=current_time,
         )
+        lab_speed_plan = build_lab_speed_plan_status(
+            control.get("cell_balance_policy"),
+            historical_income=self._historical_cell_income_status(),
+            cell_balance=control_model.get("cell_balance"),
+            active_run_metrics=control_model.get("active_run_metrics"),
+            policy_error=(
+                str(control.get("cell_balance_policy_error") or "") or None
+            ),
+        )
 
         return {
             "api_version": 1,
@@ -1545,6 +1565,7 @@ class ControlSurfaceService:
             "host_maintenance": host_maintenance,
             "emulator_degradation": emulator_degradation,
             "control_model": control_model,
+            "lab_speed_plan": lab_speed_plan,
             "runtime": runtime,
             "process_service": process_service,
             "adb_connection": adb_connection,
@@ -3570,6 +3591,25 @@ class ControlSurfaceService:
                 )
                 saved_target = saved["game_speed_target"]
                 audit = f"Requested game speed target x{saved_target:.1f}"
+            elif action == "cell_balance_policy":
+                saved = self.control_store.set_cell_balance_policy(
+                    buffer_floor_decimal=request.get("buffer_floor_decimal"),
+                    labs=request.get("labs"),
+                    source="control-surface",
+                )
+                policy = saved["cell_balance_policy"]
+                normal = "/".join(
+                    str(item["normal_speed"] or "-") for item in policy["labs"]
+                )
+                reserve = "/".join(
+                    str(item["reserve_speed"] or "-") for item in policy["labs"]
+                )
+                audit = (
+                    "Set Cell reserve and planner-only Lab targets: "
+                    f"floor={policy['buffer_floor_decimal'] or 'not-set'} "
+                    f"normal={normal} reserve={reserve}; automatic application "
+                    "remains disabled"
+                )
             elif action == "resolve_gate":
                 request_id = str(request.get("request_id") or "").strip()
                 decision_id = str(request.get("decision_id") or "").strip().lower()
@@ -3706,7 +3746,8 @@ class ControlSurfaceService:
                 raise ControlSurfaceRequestError(
                     "action must be pause, enable, start_battle, attach_battle, "
                     "take_manual_control, return_control, terminal_policy, "
-                    "game_speed, resolve_gate, resolve_tournament_launch, or "
+                    "game_speed, cell_balance_policy, resolve_gate, "
+                    "resolve_tournament_launch, or "
                     "configure_run (resume and stop remain compatibility aliases)"
                 )
         except ControlDirectiveError as exc:
@@ -3730,6 +3771,7 @@ class ControlSurfaceService:
             "enable",
             "stop",
             "terminal_policy",
+            "cell_balance_policy",
         } or disposition == "no_op":
             response["request"]["disposition"] = disposition
         if action in {"start_battle", "attach_battle"}:
@@ -4829,6 +4871,36 @@ class ControlSurfaceService:
             "errors": errors,
             "discarded_purged": purged,
         }
+
+    def _historical_cell_income_status(self) -> dict[str, Any]:
+        """Summarize gross Cell income without mutating battle retention."""
+
+        records: list[Mapping[str, Any]] = []
+        read_error_count = 0
+        with self._battle_mutation_lock:
+            paths = list(self.battles_dir.glob("Battle*.json"))
+            paths.extend(self.tournaments_dir.glob("Tournament*.json"))
+            signature_items: list[tuple[str, int, int]] = []
+            for path in paths:
+                try:
+                    stat = path.stat()
+                except OSError:
+                    read_error_count += 1
+                    continue
+                signature_items.append((str(path), stat.st_mtime_ns, stat.st_size))
+            signature = tuple(sorted(signature_items))
+            cached = self._historical_cell_income_cache
+            if cached is not None and cached[0] == signature:
+                return dict(cached[1])
+            for path in paths:
+                try:
+                    records.append(self._load_completed_battle_path(path))
+                except (OSError, json.JSONDecodeError, ValueError):
+                    read_error_count += 1
+        result = historical_cell_income(records)
+        result["read_error_count"] = read_error_count
+        self._historical_cell_income_cache = (signature, dict(result))
+        return result
 
     def battle(self, battle_id: str) -> dict[str, Any]:
         """Return one full battle record after strict identifier validation."""

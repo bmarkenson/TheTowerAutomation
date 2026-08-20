@@ -49,21 +49,24 @@ class CellBalanceTracker:
         max_samples: int = DEFAULT_CELL_BALANCE_MAX_SAMPLES,
     ) -> None:
         self.path = Path(path)
-        if buffer_floor is not None and (
-            type(buffer_floor) is not int or buffer_floor < 0
-        ):
-            raise ValueError("Cell buffer floor must be a nonnegative integer")
         if type(retention_days) is not int or retention_days < 1:
             raise ValueError("Cell balance retention must be positive")
         if type(max_samples) is not int or max_samples < 2:
             raise ValueError("Cell balance sample capacity must be at least two")
-        self.buffer_floor = (
-            Decimal(buffer_floor) if buffer_floor is not None else None
-        )
+        self.buffer_floor = _buffer_floor_decimal(buffer_floor)
         self.retention_days = retention_days
         self.max_samples = max_samples
         self._lock = threading.RLock()
         self._storage_reason = ""
+
+    def set_buffer_floor(self, value: object) -> bool:
+        """Apply a live planner reserve without restarting observation."""
+
+        floor = _buffer_floor_decimal(value)
+        with self._lock:
+            changed = floor != self.buffer_floor
+            self.buffer_floor = floor
+        return changed
 
     def observe_bundle(self, acquisition: PlayerSaveAcquisitionBundle) -> str:
         """Persist one normalized balance from an existing typed acquisition."""
@@ -316,7 +319,9 @@ class CellBalanceTracker:
         balance: Decimal,
         window_change: Optional[Mapping[str, Any]],
     ) -> dict[str, Any]:
-        if self.buffer_floor is None:
+        with self._lock:
+            floor = self.buffer_floor
+        if floor is None:
             return {
                 "status": "not_configured",
                 "floor_decimal": None,
@@ -324,7 +329,7 @@ class CellBalanceTracker:
                 "estimated_hours_to_floor_decimal": None,
                 "automatic_reduction_enabled": False,
             }
-        headroom = balance - self.buffer_floor
+        headroom = balance - floor
         estimate: Optional[Decimal] = None
         if headroom > 0 and window_change is not None:
             rate = _decimal(window_change["net_per_hour_decimal"])
@@ -334,7 +339,7 @@ class CellBalanceTracker:
                     estimate = headroom / -rate
         return {
             "status": "below" if headroom < 0 else "at" if headroom == 0 else "above",
-            "floor_decimal": _decimal_text(self.buffer_floor),
+            "floor_decimal": _decimal_text(floor),
             "headroom_decimal": _signed_decimal_text(headroom),
             "estimated_hours_to_floor_decimal": (
                 _decimal_text(estimate) if estimate is not None else None
@@ -603,6 +608,15 @@ def _nonnegative_decimal(value: Any) -> Decimal:
     number = _decimal(value)
     if not number.is_finite() or number < 0:
         raise ValueError("cell_balance_value_invalid")
+    return number
+
+
+def _buffer_floor_decimal(value: object) -> Optional[Decimal]:
+    if value is None:
+        return None
+    number = _nonnegative_decimal(value)
+    if number != number.to_integral_value():
+        raise ValueError("Cell buffer floor must be a nonnegative integer")
     return number
 
 

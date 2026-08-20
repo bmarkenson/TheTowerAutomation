@@ -54,6 +54,11 @@ from core.strategy_profiles import (
     normalize_strategy_id,
     strategy_profile_directory,
 )
+from core.lab_speed_plan import (
+    empty_cell_balance_policy,
+    new_cell_balance_policy,
+    normalize_cell_balance_policy,
+)
 
 
 VALID_STATES = frozenset({"RUNNING", "PAUSED", "STOPPED"})
@@ -452,6 +457,12 @@ class ControlDirectiveStore:
             data.get("terminal_idle_timeout")
         )
         raw_pause_refresh = data.get("pause_terminal_save_refresh")
+        raw_cell_balance_policy = data.get("cell_balance_policy")
+        cell_balance_policy = (
+            normalize_cell_balance_policy(raw_cell_balance_policy)
+            if raw_cell_balance_policy is not None
+            else empty_cell_balance_policy()
+        )
         pause_terminal_save_refresh = (
             normalize_pause_terminal_save_refresh(
                 raw_pause_refresh,
@@ -517,6 +528,15 @@ class ControlDirectiveStore:
             ),
             "game_speed_target_request_id": data.get(
                 "game_speed_target_request_id"
+            ),
+            "cell_balance_policy": (
+                cell_balance_policy or empty_cell_balance_policy()
+            ),
+            "cell_balance_policy_error": (
+                "Cell reserve and Lab speed policy is malformed"
+                if raw_cell_balance_policy is not None
+                and cell_balance_policy is None
+                else None
             ),
             "adb_port_updated_at": data.get("adb_port_updated_at"),
             "adb_port_request_id": data.get("adb_port_request_id"),
@@ -2955,6 +2975,34 @@ class ControlDirectiveStore:
             data["updated_at"] = timestamp
             data["game_speed_target_updated_at"] = timestamp
             data["game_speed_target_request_id"] = uuid4().hex
+            if source:
+                data["updated_by"] = source
+            return data
+
+        return self.update(mutate)
+
+    def set_cell_balance_policy(
+        self,
+        *,
+        buffer_floor_decimal: object,
+        labs: object,
+        source: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Persist a planner-only reserve and five-Lab speed policy."""
+
+        timestamp = _updated_at()
+        request_id = uuid4().hex
+        policy = new_cell_balance_policy(
+            buffer_floor_decimal=buffer_floor_decimal,
+            labs=labs,
+            updated_at=timestamp,
+            updated_by=source or "control-directive",
+            request_id=request_id,
+        )
+
+        def mutate(data: dict[str, Any]) -> dict[str, Any]:
+            data["cell_balance_policy"] = policy
+            data["updated_at"] = timestamp
             if source:
                 data["updated_by"] = source
             return data

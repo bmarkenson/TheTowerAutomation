@@ -206,6 +206,58 @@
       </article>
     </section>
 
+    <section class="panel wide-panel lab-planner-panel">
+      <div class="panel-heading">
+        <div>
+          <span class="eyebrow">Elite Cell reserve</span>
+          <h2>Lab Speedup planner</h2>
+        </div>
+        <span id="labPlannerBadge" class="mini-badge neutral">Loading</span>
+      </div>
+      <p class="muted">Set the Cell reserve now, then optionally choose a normal and reserve target for each Lab. The forecast appears when all five pairs are complete and uses a duration-weighted average of completed battles. Saving never opens Labs, buys a boost, or changes an active boost.</p>
+
+      <div class="lab-planner-metrics" aria-label="Cell balance and Lab plan summary">
+        <div><span>Cell balance</span><strong id="plannerCellBalance">—</strong></div>
+        <div><span>Observed net</span><strong id="plannerActualNet">—</strong></div>
+        <div><span>Historical gross</span><strong id="plannerHistoricalGross">—</strong></div>
+        <div><span>Normal burn / net</span><strong id="plannerNormalProjection">—</strong></div>
+        <div><span>Reserve burn / net</span><strong id="plannerReserveProjection">—</strong></div>
+      </div>
+
+      <form id="cellPolicyForm" class="cell-policy-form">
+        <label for="cellReserveFloor">Cell reserve floor
+          <input id="cellReserveFloor" inputmode="numeric" pattern="[0-9]+" placeholder="For example, 10000000" autocomplete="off">
+        </label>
+        <div class="table-wrap">
+          <table class="lab-policy-table">
+            <thead>
+              <tr>
+                <th>Lab</th>
+                <th>Normal target</th>
+                <th>Reserve target</th>
+                <th>Normal cost / h</th>
+                <th>Reserve cost / h</th>
+                <th>Savings / h</th>
+              </tr>
+            </thead>
+            <tbody id="labPolicyRows">
+              <tr data-lab="1"><th scope="row">Lab 1</th><td><select data-plan="normal" aria-label="Lab 1 normal speed"></select></td><td><select data-plan="reserve" aria-label="Lab 1 reserve speed"></select></td><td data-cost="normal">—</td><td data-cost="reserve">—</td><td data-cost="savings">—</td></tr>
+              <tr data-lab="2"><th scope="row">Lab 2</th><td><select data-plan="normal" aria-label="Lab 2 normal speed"></select></td><td><select data-plan="reserve" aria-label="Lab 2 reserve speed"></select></td><td data-cost="normal">—</td><td data-cost="reserve">—</td><td data-cost="savings">—</td></tr>
+              <tr data-lab="3"><th scope="row">Lab 3</th><td><select data-plan="normal" aria-label="Lab 3 normal speed"></select></td><td><select data-plan="reserve" aria-label="Lab 3 reserve speed"></select></td><td data-cost="normal">—</td><td data-cost="reserve">—</td><td data-cost="savings">—</td></tr>
+              <tr data-lab="4"><th scope="row">Lab 4</th><td><select data-plan="normal" aria-label="Lab 4 normal speed"></select></td><td><select data-plan="reserve" aria-label="Lab 4 reserve speed"></select></td><td data-cost="normal">—</td><td data-cost="reserve">—</td><td data-cost="savings">—</td></tr>
+              <tr data-lab="5"><th scope="row">Lab 5</th><td><select data-plan="normal" aria-label="Lab 5 normal speed"></select></td><td><select data-plan="reserve" aria-label="Lab 5 reserve speed"></select></td><td data-cost="normal">—</td><td data-cost="reserve">—</td><td data-cost="savings">—</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="cell-policy-actions">
+          <p id="cellPolicyStatus" class="fine-print">Waiting for the saved policy.</p>
+          <button id="saveCellPolicyButton" class="primary" type="submit">Save reserve and Lab plan</button>
+        </div>
+      </form>
+      <div id="labPlannerRecommendation" class="callout" role="status">Complete all five Lab targets to calculate the plan.</div>
+      <p class="fine-print">1× means do not queue another speedup at the next renewal. Active speedups continue until their timers expire. Automatic application remains disabled.</p>
+    </section>
+
     <section class="panel wide-panel">
       <div class="panel-heading">
         <div>

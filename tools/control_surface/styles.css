@@ -192,8 +192,23 @@ input, select { width: 100%; padding: .68rem .75rem; }
 .callout { margin-top: 1rem; padding: .75rem; border-radius: .6rem; font-size: .75rem; line-height: 1.45; }
 .callout.warning { color: #f7d58f; background: rgba(241, 191, 91, .08); border: 1px solid rgba(241, 191, 91, .28); }
 .callout.success { color: #9cf0cd; background: rgba(73, 214, 157, .08); border: 1px solid rgba(73, 214, 157, .28); }
+.callout.info { color: #9ee8ff; background: rgba(98, 213, 255, .07); border: 1px solid rgba(98, 213, 255, .26); }
 
 .wide-panel { margin-top: 1rem; }
+.lab-planner-metrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .7rem; margin: 1rem 0; }
+.lab-planner-metrics div { min-width: 0; padding: .8rem; border: 1px solid var(--border); border-radius: .7rem; background: var(--panel-2); }
+.lab-planner-metrics span { display: block; color: var(--muted); font-size: .67rem; margin-bottom: .3rem; text-transform: uppercase; letter-spacing: .05em; }
+.lab-planner-metrics strong { display: block; overflow-wrap: anywhere; font-size: .85rem; }
+.cell-policy-form { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border); }
+.cell-policy-form > label { display: block; max-width: 24rem; color: var(--muted); font-size: .75rem; font-weight: 700; }
+.cell-policy-form > label input { display: block; margin-top: .35rem; }
+.lab-policy-table { margin-top: .8rem; }
+.lab-policy-table th[scope="row"] { color: var(--text); font-size: .75rem; text-transform: none; letter-spacing: 0; }
+.lab-policy-table select { min-width: 8rem; padding: .52rem .65rem; }
+.lab-policy-table td[data-cost] { font-variant-numeric: tabular-nums; }
+.cell-policy-actions { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-top: .8rem; }
+.cell-policy-actions .fine-print { margin: 0; }
+.cell-policy-actions button { flex: 0 0 auto; }
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: .78rem; }
 th { color: var(--muted); font-size: .67rem; letter-spacing: .07em; text-transform: uppercase; text-align: left; }
@@ -275,6 +290,7 @@ dialog::backdrop { background: rgba(1, 4, 10, .78); backdrop-filter: blur(3px); 
   .control-panel { grid-row: span 2; }
   .status-strip { align-items: flex-start; }
   .status-strip-meta { grid-template-columns: 1fr 1fr; }
+  .lab-planner-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
 @media (max-width: 720px) {
@@ -291,4 +307,6 @@ dialog::backdrop { background: rgba(1, 4, 10, .78); backdrop-filter: blur(3px); 
   .activity-list li { grid-template-columns: 1fr; gap: .15rem; }
   .detail-card-grid { grid-template-columns: 1fr 1fr; }
   .capture-metadata, .capture-review-grid, .form-grid { grid-template-columns: 1fr; }
+  .lab-planner-metrics { grid-template-columns: 1fr 1fr; }
+  .cell-policy-actions { align-items: stretch; flex-direction: column; }
 }

@@ -360,13 +360,16 @@ status field and guarded runtime directive own it.
 A fourth status row is account-scoped rather than battle-scoped. **Cell
 Balance** shows the latest exact-version save total, **Cell Net Trend** shows
 the comparable net change over 24 hours (or over the shorter retained start),
-and **Cell Buffer** shows reserve headroom when Linux was launched with
-`--cell-buffer` or `THETOWER_CELL_BUFFER`. A falling trend and a breached
-reserve use warning color. Tooltips name the capture age, comparison basis,
-sample counts, and structural-only authority. The row can remain visible
-outside an active battle while a fresh runtime status is available. It never
-separates generation from Lab spending, polls a save, or changes a Lab
-Speedup.
+and **Cell Buffer** shows reserve headroom. The Lab Speedup planner below the
+run controls edits that reserve live and can record normal and reserve targets
+for each of five Labs. The reserve can be saved before those optional pairs are
+complete. Once all five are set, it shows exact per-Lab Cell cost, savings, a
+duration-weighted gross rate from up to 20 completed battles, and projected net
+flow for both plans. `1x` means no renewal. A falling trend, breached reserve,
+or reserve plan that still declines uses warning color. The account row can
+remain visible outside an active battle while fresh runtime status is
+available. Neither it nor the planner polls a save, opens Labs, buys or queues
+a boost, or changes an active speedup; automatic application remains disabled.
 
 The application header keeps four different health signals visible: the fixed
 Linux API service's systemd state, HTTP reachability, the Windows-local API SSH
@@ -1174,9 +1177,9 @@ supported capabilities. The Windows build carries an expected API version, a
 minimum server revision, and required capabilities. Any mismatch produces a
 prominent full-width **Linux API update required** banner, disables dependent
 actions, and gives disabled Start buttons the same blocker in a tooltip. The
-current Windows build requires revision 52, `bounded_idle_timeout_v1`,
+current Windows build requires revision 53, `bounded_idle_timeout_v1`,
 `active_battle_screen_metrics_v1`, `active_run_metrics_v1`,
-`cell_balance_tracking_v1`,
+`cell_balance_tracking_v1`, `lab_speed_reserve_planner_v1`,
 `current_battle_perks_v1`, `better_control_model_v2`,
 `runtime_control_acknowledgements_v1`,
 `strategy_aware_attach_v1`,

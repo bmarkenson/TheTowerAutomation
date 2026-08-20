@@ -9,18 +9,21 @@ as checked checkpoint narrative here.
 
 ## Current validation gates
 
-- [ ] Add a guarded Lab Speedup reserve protector after the Cell Balance
-  tracker has accumulated representative rising, paused/offline, slow-run, and
-  falling intervals. First map the exact-version Lab Speedup slot, multiplier,
-  remaining-time, and Cell-cost semantics with authoritative UI evidence;
-  retain the current warning-only buffer until that contract is complete.
-  Define an operator-selected downgrade order, reserve floor, recovery margin,
-  and minimum dwell time so a noisy or delayed save cannot flap settings. Any
-  later mutation must use an explicit Lab UI owner, recheck Pause/manual and
-  navigation authority before every input, verify the resulting UI and a later
-  Cell checkpoint, and fail closed on target, mapping, freshness, or continuity
-  changes. A structurally observed balance or negative net trend alone never
-  grants Lab input authority.
+- [ ] Add guarded application of the planned Lab Speedup reserve targets after
+  the Cell Balance tracker has accumulated representative rising,
+  paused/offline, slow-run, and falling intervals. The UI now owns a live
+  reserve floor plus normal/reserve targets for all five Labs, and the planner
+  uses authoritative version-1101 multiplier, one-hour Cell-cost, linear
+  duration, queue-checkbox, and renewal-boundary evidence. It remains
+  calculation-only. Before mutation, map exact slot identity, current
+  multiplier, remaining time, queue state, and selected next duration into a
+  typed Lab UI owner. Define downgrade order or priority, recovery margin,
+  minimum dwell time, and partial-renewal behavior so delayed saves and
+  staggered expiries cannot flap settings. Recheck Pause/manual and navigation
+  authority before every input, verify the resulting UI and a later Cell
+  checkpoint, and fail closed on target, mapping, freshness, or continuity
+  changes. A reserve breach, forecast, structurally observed balance, or
+  negative net trend alone never grants Lab input authority.
 - [ ] Cross-validate each current exact player-save mapping against fresh UI
   inventory from the same version, and add a new exact candidate whenever the
   game reports a different identity. Execute the complete

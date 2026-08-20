@@ -41,6 +41,7 @@ public sealed class ControlSurfaceCompatibilityTests
             result.MissingCapabilities);
         Assert.Contains("active_run_metrics_v1", result.MissingCapabilities);
         Assert.Contains("cell_balance_tracking_v1", result.MissingCapabilities);
+        Assert.Contains("lab_speed_reserve_planner_v1", result.MissingCapabilities);
         Assert.Contains("current_battle_perks_v1", result.MissingCapabilities);
         Assert.Contains(
             "confirmed_local_mapping_status_v2",
@@ -548,6 +549,7 @@ public sealed class ControlSurfaceCompatibilityTests
                 "better_control_model_v2",
                 "bounded_idle_timeout_v1",
                 "cell_balance_tracking_v1",
+                "lab_speed_reserve_planner_v1",
                 "bluestacks_maintenance_v1",
                 "bluestacks_maintenance_v2",
                 "bluestacks_operator_restart_v1",

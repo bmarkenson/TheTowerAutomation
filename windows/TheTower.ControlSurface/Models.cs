@@ -53,6 +53,9 @@ public sealed class StatusResponse
     [JsonPropertyName("control_model")]
     public BetterControlModelStatus? ControlModel { get; set; }
 
+    [JsonPropertyName("lab_speed_plan")]
+    public LabSpeedPlanStatus? LabSpeedPlan { get; set; }
+
     [JsonPropertyName("runtime")]
     public RuntimeStatus Runtime { get; set; } = new();
 
@@ -1041,6 +1044,165 @@ public sealed class CellBalanceProvenanceStatus
 
     [JsonPropertyName("evidence_level")]
     public string EvidenceLevel { get; set; } = "";
+}
+
+public sealed class LabSpeedPlanStatus
+{
+    [JsonPropertyName("schema_version")]
+    public int SchemaVersion { get; set; }
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "incomplete";
+
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = "";
+
+    [JsonPropertyName("policy")]
+    public CellBalancePolicyStatus Policy { get; set; } = new();
+
+    [JsonPropertyName("cost_model")]
+    public LabSpeedCostModel CostModel { get; set; } = new();
+
+    [JsonPropertyName("income")]
+    public HistoricalCellIncomeStatus Income { get; set; } = new();
+
+    [JsonPropertyName("current_run_cells_per_hour_decimal")]
+    public string? CurrentRunCellsPerHourDecimal { get; set; }
+
+    [JsonPropertyName("actual_balance_net_per_hour_decimal")]
+    public string? ActualBalanceNetPerHourDecimal { get; set; }
+
+    [JsonPropertyName("normal_plan")]
+    public LabSpeedProjectionStatus NormalPlan { get; set; } = new();
+
+    [JsonPropertyName("reserve_plan")]
+    public LabSpeedProjectionStatus ReservePlan { get; set; } = new();
+
+    [JsonPropertyName("recommendation")]
+    public LabSpeedRecommendationStatus Recommendation { get; set; } = new();
+
+    [JsonPropertyName("application_boundary")]
+    public string ApplicationBoundary { get; set; } = "";
+
+    [JsonPropertyName("automatic_application_enabled")]
+    public bool AutomaticApplicationEnabled { get; set; }
+
+    [JsonPropertyName("ui_action_authority")]
+    public bool UiActionAuthority { get; set; }
+}
+
+public sealed class CellBalancePolicyStatus
+{
+    [JsonPropertyName("schema_version")]
+    public int SchemaVersion { get; set; }
+
+    [JsonPropertyName("buffer_floor_decimal")]
+    public string? BufferFloorDecimal { get; set; }
+
+    [JsonPropertyName("labs")]
+    public List<LabSpeedPolicyItem> Labs { get; set; } = [];
+
+    [JsonPropertyName("automatic_reduction_enabled")]
+    public bool AutomaticReductionEnabled { get; set; }
+
+    [JsonPropertyName("updated_at")]
+    public string? UpdatedAt { get; set; }
+
+    [JsonPropertyName("updated_by")]
+    public string? UpdatedBy { get; set; }
+
+    [JsonPropertyName("request_id")]
+    public string? RequestId { get; set; }
+}
+
+public sealed class LabSpeedPolicyItem
+{
+    [JsonPropertyName("lab")]
+    public int Lab { get; set; }
+
+    [JsonPropertyName("normal_speed")]
+    public string? NormalSpeed { get; set; }
+
+    [JsonPropertyName("reserve_speed")]
+    public string? ReserveSpeed { get; set; }
+
+    [JsonPropertyName("normal_cells_per_hour_decimal")]
+    public string? NormalCellsPerHourDecimal { get; set; }
+
+    [JsonPropertyName("reserve_cells_per_hour_decimal")]
+    public string? ReserveCellsPerHourDecimal { get; set; }
+
+    [JsonPropertyName("savings_per_hour_decimal")]
+    public string? SavingsPerHourDecimal { get; set; }
+}
+
+public sealed class LabSpeedCostModel
+{
+    [JsonPropertyName("source")]
+    public string Source { get; set; } = "";
+
+    [JsonPropertyName("duration_scaling")]
+    public string DurationScaling { get; set; } = "";
+
+    [JsonPropertyName("cells_per_hour_by_speed")]
+    public Dictionary<string, string> CellsPerHourBySpeed { get; set; } = [];
+}
+
+public sealed class HistoricalCellIncomeStatus
+{
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "unavailable";
+
+    [JsonPropertyName("basis")]
+    public string Basis { get; set; } = "";
+
+    [JsonPropertyName("sample_count")]
+    public int SampleCount { get; set; }
+
+    [JsonPropertyName("cells_per_hour_decimal")]
+    public string? CellsPerHourDecimal { get; set; }
+
+    [JsonPropertyName("total_cells_decimal")]
+    public string? TotalCellsDecimal { get; set; }
+
+    [JsonPropertyName("total_real_hours_decimal")]
+    public string? TotalRealHoursDecimal { get; set; }
+
+    [JsonPropertyName("oldest_captured_at")]
+    public string? OldestCapturedAt { get; set; }
+
+    [JsonPropertyName("newest_captured_at")]
+    public string? NewestCapturedAt { get; set; }
+}
+
+public sealed class LabSpeedProjectionStatus
+{
+    [JsonPropertyName("complete")]
+    public bool Complete { get; set; }
+
+    [JsonPropertyName("burn_per_hour_decimal")]
+    public string? BurnPerHourDecimal { get; set; }
+
+    [JsonPropertyName("burn_per_day_decimal")]
+    public string? BurnPerDayDecimal { get; set; }
+
+    [JsonPropertyName("projected_net_per_hour_decimal")]
+    public string? ProjectedNetPerHourDecimal { get; set; }
+
+    [JsonPropertyName("projected_net_per_day_decimal")]
+    public string? ProjectedNetPerDayDecimal { get; set; }
+
+    [JsonPropertyName("estimated_hours_to_floor_decimal")]
+    public string? EstimatedHoursToFloorDecimal { get; set; }
+}
+
+public sealed class LabSpeedRecommendationStatus
+{
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "policy_incomplete";
+
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = "";
 }
 
 public sealed class ActiveBattleScreenMetricStatus

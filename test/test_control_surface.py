@@ -4088,6 +4088,57 @@ def test_battle_list_is_compact_and_full_record_requires_exact_id(tmp_path):
     assert exc_info.value.status == 404
 
 
+def test_lab_speed_planner_uses_completed_battle_income_and_persisted_policy(
+    tmp_path,
+):
+    _write_battle(tmp_path)
+    service = _service(tmp_path)
+    labs = [
+        {"lab": lab, "normal_speed": "2", "reserve_speed": "1.5"}
+        for lab in range(1, 6)
+    ]
+
+    response = service.apply_control(
+        {
+            "action": "cell_balance_policy",
+            "buffer_floor_decimal": "20000000",
+            "labs": labs,
+        }
+    )
+
+    assert response["request"] == {
+        "accepted": True,
+        "action": "cell_balance_policy",
+        "disposition": "requested",
+    }
+    assert response["control"]["cell_balance_policy"][
+        "buffer_floor_decimal"
+    ] == "20000000"
+    plan = response["lab_speed_plan"]
+    assert plan["income"]["sample_count"] == 1
+    assert float(plan["income"]["cells_per_hour_decimal"]) == pytest.approx(
+        797 * 3600 / 376
+    )
+    assert plan["normal_plan"]["burn_per_hour_decimal"] == "500"
+    assert plan["reserve_plan"]["burn_per_hour_decimal"] == "75"
+    assert plan["automatic_application_enabled"] is False
+    assert "automatic application remains disabled" in (
+        tmp_path / "logs" / "actions.log"
+    ).read_text(encoding="utf-8")
+
+    with pytest.raises(ControlSurfaceRequestError, match="reserve speed"):
+        service.apply_control(
+            {
+                "action": "cell_balance_policy",
+                "buffer_floor_decimal": "20000000",
+                "labs": [
+                    {"lab": lab, "normal_speed": "5", "reserve_speed": "6"}
+                    for lab in range(1, 6)
+                ],
+            }
+        )
+
+
 def test_completed_battle_discard_moves_pair_then_purges_after_deadline(tmp_path):
     battle_id = "Battle20260719T101126-0700"
     json_path = _write_battle(tmp_path, battle_id)
@@ -4475,7 +4526,7 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert "When this battle ends" in html
     assert 'id="terminalPolicyStatus"' in html
     assert "RetryModeButton" not in native_xaml
-    assert "MinimumServerRevision = 52" in native_compatibility
+    assert "MinimumServerRevision = 53" in native_compatibility
     assert '"bounded_idle_timeout_v1"' in native_compatibility
     assert "bounded_idle_timeout_v1" in CONTROL_SURFACE_CAPABILITIES
     assert "paused_terminal_save_refresh_v1" in CONTROL_SURFACE_CAPABILITIES
@@ -4491,6 +4542,13 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert 'x:Name="CellBufferMetricPanel"' in native_xaml
     assert 'JsonPropertyName("cell_balance")' in native_models
     assert "CellBalancePresenter.Present(" in native_code
+    assert '"lab_speed_reserve_planner_v1"' in native_compatibility
+    assert "lab_speed_reserve_planner_v1" in CONTROL_SURFACE_CAPABILITIES
+    assert 'id="cellPolicyForm"' in html
+    assert 'x:Name="CellReserveFloorTextBox"' in native_xaml
+    assert 'x:Name="Lab5ReserveSpeedBox"' in native_xaml
+    assert 'JsonPropertyName("lab_speed_plan")' in native_models
+    assert "RenderLabSpeedPlan(status.LabSpeedPlan)" in native_code
     assert '"emulator_host_selection_v1"' in native_compatibility
     assert "emulator_host_selection_v1" in CONTROL_SURFACE_CAPABILITIES
     assert 'x:Name="UseThisEmulatorButton"' in native_xaml

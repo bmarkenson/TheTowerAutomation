@@ -6,6 +6,8 @@ from pathlib import Path
 import sqlite3
 import stat
 
+import pytest
+
 from core.cell_balance_tracker import CellBalanceTracker
 from core.player_save import (
     PlayerSaveCapabilityEvidence,
@@ -274,6 +276,19 @@ def test_buffer_breach_warns_without_enabling_automatic_reduction(
         "estimated_hours_to_floor_decimal": None,
         "automatic_reduction_enabled": False,
     }
+
+
+def test_buffer_floor_can_be_changed_live_without_rewriting_history(tmp_path: Path):
+    tracker = CellBalanceTracker(tmp_path / "cell_balance.sqlite3")
+    tracker.observe_bundle(_bundle(900, START))
+
+    assert tracker.set_buffer_floor("1000") is True
+    assert tracker.status()["buffer"]["status"] == "below"
+    assert tracker.set_buffer_floor("1000") is False
+    assert tracker.set_buffer_floor(None) is True
+    assert tracker.status()["buffer"]["status"] == "not_configured"
+    with pytest.raises(ValueError, match="nonnegative integer"):
+        tracker.set_buffer_floor("1.5")
 
 
 def test_history_is_bounded_by_capacity_and_retention(tmp_path: Path):

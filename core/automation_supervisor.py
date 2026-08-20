@@ -53,6 +53,7 @@ from core.control_model import (
     validate_process_restart_handoff,
     validate_setup_capture,
 )
+from core.lab_speed_plan import normalize_cell_balance_policy
 from core.strategy_profiles import is_configurable_strategy
 from utils.logger import log as _write_log, log_action_intent, log_result
 from core.run_state import AUTOMATION
@@ -141,6 +142,13 @@ class AutomationSupervisor:
         )
         self._game_speed_target = self._parse_game_speed_target(
             initial_directives.get("game_speed_target")
+        )
+        self._cell_balance_policy = normalize_cell_balance_policy(
+            initial_directives.get("cell_balance_policy")
+        )
+        self._cell_balance_policy_error = bool(
+            initial_directives.get("cell_balance_policy") is not None
+            and self._cell_balance_policy is None
         )
         self._gate_decision = self._parse_gate_decision(initial_directives)
         self._exclusive_validation = self._parse_exclusive_validation(
@@ -265,6 +273,18 @@ class AutomationSupervisor:
         """Return the persistent exact or maximum-available speed target."""
 
         return self._game_speed_target
+
+    @property
+    def cell_balance_policy(self) -> Optional[Dict[str, object]]:
+        """Return the latest valid planner policy, if one is configured."""
+
+        return deepcopy(self._cell_balance_policy)
+
+    @property
+    def cell_balance_policy_error(self) -> bool:
+        """Return whether the planner policy exists but is malformed."""
+
+        return bool(self._cell_balance_policy_error)
 
     @property
     def gate_decision(self) -> Optional[Dict[str, object]]:
@@ -751,6 +771,13 @@ class AutomationSupervisor:
             self._strategy_request = self._parse_strategy_request(directives)
             self._strategy_active_battle_identity = (
                 self._parse_strategy_active_battle_identity(directives)
+            )
+            self._cell_balance_policy = normalize_cell_balance_policy(
+                directives.get("cell_balance_policy")
+            )
+            self._cell_balance_policy_error = bool(
+                directives.get("cell_balance_policy") is not None
+                and self._cell_balance_policy is None
             )
             self._gate_decision = self._parse_gate_decision(directives)
             self._exclusive_validation = self._parse_exclusive_validation(

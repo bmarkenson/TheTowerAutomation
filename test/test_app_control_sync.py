@@ -27,6 +27,35 @@ def _emulator_location(host_id: str, host_name: str, process_id: int) -> dict:
     }
 
 
+def test_cell_policy_reserve_live_override_clear_and_malformed_fallback():
+    app = App.__new__(App)
+    app._config = SimpleNamespace(cell_buffer_floor=25_000_000)
+    app._cell_balance_tracker = MagicMock()
+    app._supervisor = SimpleNamespace(
+        cell_balance_policy=None,
+        cell_balance_policy_error=False,
+    )
+
+    app._sync_cell_balance_policy()
+    app._cell_balance_tracker.set_buffer_floor.assert_called_once_with(25_000_000)
+
+    app._supervisor.cell_balance_policy = {
+        "buffer_floor_decimal": "10000000",
+    }
+    app._sync_cell_balance_policy()
+    app._cell_balance_tracker.set_buffer_floor.assert_called_with("10000000")
+
+    app._supervisor.cell_balance_policy = {"buffer_floor_decimal": None}
+    app._sync_cell_balance_policy()
+    app._cell_balance_tracker.set_buffer_floor.assert_called_with(None)
+
+    app._cell_balance_tracker.set_buffer_floor.reset_mock()
+    app._supervisor.cell_balance_policy = None
+    app._supervisor.cell_balance_policy_error = True
+    app._sync_cell_balance_policy()
+    app._cell_balance_tracker.set_buffer_floor.assert_not_called()
+
+
 def test_control_is_synchronized_before_each_capture_attempt():
     events = []
     supervisor = MagicMock()

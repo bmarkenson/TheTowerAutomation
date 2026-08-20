@@ -567,13 +567,38 @@ at least 24 hours old, or the first comparable sample when less history exists.
 It is net movement only: Cell generation, Lab Speedup charges, and save write
 lag are not decomposed or assigned a cause.
 
-`--cell-buffer CELLS` or `THETOWER_CELL_BUFFER=CELLS` adds a nonnegative reserve
-floor. Status reports headroom and, only while the observed net rate is
-negative, an estimated time to the floor. Crossing below the floor emits one
-operator warning until recovery. The tracker and control API always publish
-`ui_action_authority=false` and `automatic_reduction_enabled=false`; this
-release never opens Labs or changes a Lab Speedup. HTTP status polling reads
-only the retained summary and performs no ADB or save work.
+The durable `cell_balance_policy` in `automation_ctl.json` owns the UI-selected
+nonnegative reserve floor. The browser and Windows control surfaces update it
+atomically without restarting automation; the runtime applies a valid change to
+the tracker on its next control poll. A malformed update preserves the last
+known-good floor. `--cell-buffer CELLS` or `THETOWER_CELL_BUFFER=CELLS` remains
+the startup fallback only while no UI policy exists. An explicitly saved empty
+floor clears that fallback. Status reports headroom and, only while the observed
+net rate is negative, an estimated time to the floor. Crossing below the floor
+emits one operator warning until recovery.
+
+The same policy can carry a normal and reserve target for each of five Labs.
+The reserve floor is independently saveable; each Lab pair may remain blank,
+and projections stay explicitly incomplete until all five pairs are present.
+Allowed targets are `1x`, `1.5x`, and whole multipliers `2x` through `8x`; `1x`
+means do not renew a speedup. The planner uses the exact one-hour UI costs
+observed on game version 1101—`0`, `15`, `100`, `840`, `3,360`, `11,900`,
+`60,000`, `250,000`, and `1,000,000` Cells respectively. The UI also confirmed
+that 8-hour and 24-hour prices scale linearly and that a selection made while a
+boost is active applies only at a later queue or renewal boundary.
+
+Gross historical income is the total Cells divided by total real time across
+the newest 20 usable representative completed battle records. This
+duration-weighted rate prevents a short battle from counting like a long one.
+The planner subtracts normal and reserve hourly burn from that gross rate and
+shows each projected net separately from the tracker's observed account-balance
+net. It also shows current-run Cells/hour as a distinct, nonhistorical
+comparison when available. Missing or partial battle history remains explicit.
+
+The tracker, planner, and control API always publish false action-authority and
+automatic-application fields. This release never opens Labs, queues, buys, or
+changes a Lab Speedup. HTTP status polling reads only retained summaries and
+completed records and performs no ADB or save work.
 
 The causally bound natural terminal reuses the existing terminal bundle and
 checks terminal kind plus exact process/target/round/window provenance.
