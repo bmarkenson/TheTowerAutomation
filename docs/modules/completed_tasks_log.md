@@ -64,6 +64,22 @@ resolved dossier instead of copying its detail.
   all 3,064 repository tests in 629.49 seconds using development-environment
   fingerprint
   `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+- Follow-up exact candidate `520a47b` closes two deployment-discovered route
+  gaps. Managed same-battle Start now gives each newly observed forced-save or
+  Attach-adoption milestone a fresh bounded settlement interval without
+  allowing repeated or flapping state to extend the wait indefinitely.
+  Tournament Continue/Home now leaves Results through verified `OK`, exits the
+  resulting Tournament Screen through its verified Return-to-Game strip, and
+  succeeds only at ordinary Home `NEW_BATTLE`; a retry already at Tournament
+  Screen does not repeat the Results input.
+- Follow-up focused validation passed all 74 process-management tests and 21
+  affected Tournament terminal-route tests. The runtime/shared-control
+  candidate-gate row again required the complete checkpoint; exact candidate
+  `520a47b` compiled all Python, validated state definitions and clickmap
+  integrity with zero errors and the established 44 orphan notices, and passed
+  all 3,066 repository tests in 636.41 seconds using development-environment
+  fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
 
 ### 2026-08-19 Expected same-battle emulator-handoff wave rollback
 

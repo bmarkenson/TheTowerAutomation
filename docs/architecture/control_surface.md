@@ -105,9 +105,13 @@ agnostic.
   after forced serialization compares the current `ActiveRoundIdentity` with
   the retained one. Equality reattaches the same battle; a later identity
   discards old battle-local state and completes the same normal Attach for the
-  successor. If no such handoff exists, Start remains Paused with no battle
-  workflow selected and does not enable actions, start a battle, or attach to
-  one. Repeating an already satisfied Start or Stop is an explicit no-op.
+  successor. The waiter remains bounded by lack of progress rather than one
+  end-to-end wall-clock deadline: each newly observed forced-save or adoption
+  milestone receives a fresh settlement interval, while repeated or flapping
+  state cannot renew it indefinitely. If no such handoff exists, Start remains
+  Paused with no battle workflow selected and does not enable actions, start a
+  battle, or attach to one. Repeating an already satisfied Start or Stop is an
+  explicit no-op.
 - For managed launches, the long-lived Linux control service is the sole ADB
   reconnect owner. It reads the same persisted port, starts or reuses the ADB
   server inside its own service lifetime, and maintains only that exact
@@ -330,7 +334,7 @@ override an authoritative scope.
 | Live | capture has a terminal result | `saved`, `cancelled`, `unavailable`, `interrupted`, or `failed` | reopen Capture | inspect the prior result only; a new serialization requires the separate explicit **Try capture again** action |
 | Live | enabled | Game Over after a configuration-degraded strategy battle | Continue was already selected for this terminal | snapshot the degradation, collect terminal data best effort, return Home, apply any pending Strategy, run its ordinary bounded setup, and consume one exact continuation; failed Home navigation retries and exhausted setup launches degraded without changing global authority |
 | Live | enabled | any other Game Over | selected future terminal policy | collect terminal data best effort, then follow Retry/Home; if the route fails, retain it for a fresh-evidence retry without changing authority |
-| Live | enabled | Tournament Results | selected future terminal policy | `WAIT` retains the screen; Continue/Home first capture the result and use the verified dismissal route; failure retries from fresh evidence without changing authority; only Continue already selected for that terminal boundary can carry one exact launch through verified New Battle Home |
+| Live | enabled | Tournament Results | selected future terminal policy | `WAIT` retains the screen; Continue/Home first capture the result, press verified Results `OK`, leave Tournament Screen through its verified Return-to-Game strip, and require ordinary New Battle Home; failure retries from either retained Tournament boundary without changing authority; only Continue already selected for that terminal boundary can carry one exact launch through verified New Battle Home |
 | Live/stopped | already satisfied | any | repeated Pause, Enable, Start Automation, Stop Automation, terminal policy, or Take Manual Control where defined | return a visible no-op instead of fabricating a transition |
 
 An intent requested under Pause is pending, not acknowledged action authority.
@@ -340,15 +344,18 @@ process boundary interrupt unfinished workflows. Home alone never enables or
 pauses input.
 
 At Tournament Results, `WAIT` is satisfied by retaining the screen until its
-bounded idle deadline. Continue automatically and Home first preserve the result, then use the
-verified OK-to-Home dismissal owner. A failed dismissal retains the selected
-future policy and retries from fresh terminal evidence without changing action
-authority. Continue still does not make the policy control an immediate battle
-command. If Continue was already selected when this exact terminal boundary
-was handled, successful dismissal may freeze one process-local continuation
-claim for the next verified New Battle Home. Selecting Continue after a
-retained result can dismiss that result, but it does not retroactively create a
-Home launch claim.
+bounded idle deadline. Continue automatically and Home first preserve the
+result, then use one verified route owner for Results `OK`, Tournament Screen's
+Return-to-Game strip, and ordinary Home `NEW_BATTLE` verification. A retry may
+resume from either Tournament Results or Tournament Screen without repeating
+an already-completed Results tap. A failed route retains the selected future
+policy and retries from fresh evidence without changing action authority.
+Continue still does not make the policy control an immediate battle command.
+If Continue was already selected when this exact terminal boundary was
+handled, successful dismissal may freeze one process-local continuation claim
+for the next verified New Battle Home. Selecting Continue after a retained
+result can dismiss that result, but it does not retroactively create a Home
+launch claim.
 
 Managed Home launch authority is deliberately narrower than terminal policy.
 An ordinary healthy Game Over under Continue uses its direct Retry control. A

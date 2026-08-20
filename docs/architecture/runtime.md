@@ -1557,10 +1557,12 @@ configuration-validation, repair, and receipt failures are flagged without
 changing global authority. Game Over statistics collection is best effort;
 the selected Retry/Home route is still attempted and a failed terminal tap is
 retried from fresh terminal evidence with action authority unchanged.
-Tournament Results dismissal follows the same retry rule. Explicit Pause,
-Take Manual Control, and Stop remain operator boundaries. Changed workflow or
-target ownership, unproved restoration after lifecycle input, and uncertain
-input results are catastrophic safety boundaries and may Pause automatically.
+Tournament Results dismissal follows the same retry rule across its verified
+Results `OK`, Tournament Screen Return-to-Game, and ordinary Home verification
+stages. Explicit Pause, Take Manual Control, and Stop remain operator
+boundaries. Changed workflow or target ownership, unproved restoration after
+lifecycle input, and uncertain input results are catastrophic safety
+boundaries and may Pause automatically.
 An active-battle emulator handoff whose destination identity, save revision,
 or target fails its retained source guard is the corresponding save-continuity
 catastrophe. Destination wave rollback alone is expected when another PC loads

@@ -56,8 +56,10 @@ owned. In that case Start creates a fresh Attach, enables only for its guarded
 validation, and completes only after a forced save identifies the current
 active battle. An equal `ActiveRoundIdentity` reattaches the retained battle; a
 later identity discards old battle-local state and attaches the successor.
-Ended-battle, changed-target, unavailable-proof, or authority/restoration
-failure leaves Automation Paused.
+The bounded completion wait renews its settlement interval only when it
+observes a new forced-save or Attach-adoption milestone; a genuinely stalled
+workflow still times out. Ended-battle, changed-target, unavailable-proof, or
+authority/restoration failure leaves Automation Paused.
 
 Start Battle is accepted only with fresh verified Home `NEW_BATTLE` evidence;
 Attach to Battle requires fresh Home `RESUME_BATTLE` or active-battle evidence.
@@ -107,10 +109,13 @@ effort; the selected terminal route is still attempted. A failed route tap
 stays pending for a fresh-evidence retry without changing action authority or
 the selected policy. Tournament Results satisfies `WAIT` by retaining the
 screen; `NEXT_BATTLE` and `HOME` persist the result and retry the verified
-dismissal route under the same authority-preserving rule. Legacy `RETRY`
-normalizes to `NEXT_BATTLE`. Safety, manual-control, startup, handoff, and
-explicit maintenance pauses remain indefinite; the primary operator Pause is
-the existing 30-minute timed directive.
+dismissal route under the same authority-preserving rule. That route presses
+the verified Results `OK`, leaves the resulting Tournament section through its
+verified Return-to-Game strip, and succeeds only at ordinary Home
+`NEW_BATTLE`. Legacy `RETRY` normalizes to `NEXT_BATTLE`. Safety,
+manual-control, startup, handoff, and explicit maintenance pauses remain
+indefinite; the primary operator Pause is the existing 30-minute timed
+directive.
 
 A persistent game-speed target is independent of Pause. Acknowledged values
 `x0.0`–`x6.0` are exact; `max`/`x6.3` means maximum available. It persists

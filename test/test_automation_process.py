@@ -1187,6 +1187,109 @@ def test_process_restart_wait_accepts_completed_later_battle_attach(tmp_path):
     assert result is expected_status
 
 
+def test_process_restart_wait_extends_timeout_after_forced_save_progress(
+    tmp_path,
+    monkeypatch,
+):
+    manager = FakeManager(active=True)
+    service = _service(tmp_path, manager)
+    source = _write_pending_restart_handoff(service)
+    pending = service.control_store.status()["process_restart_handoff"]
+    replacement = {
+        **source,
+        "runtime_id": "replacement-runtime",
+        "pid": manager.pid,
+        "observation_id": "replacement-runtime:1",
+    }
+    workflow = service.control_store.request_battle_workflow(
+        "attach_battle",
+        evidence=replacement,
+        process_restart_handoff_id=pending["handoff_id"],
+        source="test-replacement",
+    )
+    bound_handoff = service.control_store.status()["process_restart_handoff"]
+    completed_handoff = service.control_store.finish_process_restart_handoff(
+        pending["handoff_id"],
+        "completed",
+        reason="same battle force-validated",
+        workflow_id=workflow["request_id"],
+        actual_active_round_identity="a" * 64,
+    )
+    completed_workflow = {
+        **workflow,
+        "status": "completed",
+        "configuration": {
+            "schema_version": 1,
+            "stage": "completed",
+            "reporting_status": "unavailable",
+            "attachment_mode": "observation_only",
+            "degraded": True,
+        },
+    }
+
+    def status(*, identity=None, completed=False):
+        return {
+            "process_service": {"active": True, "main_pid": manager.pid},
+            "runtime": {
+                "instances": [{"active": True, "pid": manager.pid}],
+            },
+            "control": {
+                "process_restart_handoff": (
+                    completed_handoff if completed else bound_handoff
+                ),
+                "battle_workflow": (
+                    completed_workflow if completed else workflow
+                ),
+            },
+            "control_model": {
+                "observation": {
+                    "game_state": "active_battle",
+                    "active_round_identity_fingerprint": identity,
+                },
+                "action_authority": {
+                    "effective": "enabled" if completed else "blocked",
+                },
+                "actions": {
+                    "manage_active_battle": {"available": completed},
+                },
+            },
+        }
+
+    statuses = iter(
+        [status()] * 4
+        + [status(identity="a" * 64)]
+        + [status(identity="a" * 64, completed=True)]
+    )
+    clock = {"now": 0.0}
+
+    monkeypatch.setattr(
+        "core.control_surface.ATTACHED_RESTART_TIMEOUT_SECONDS",
+        1.0,
+    )
+    monkeypatch.setattr(
+        "core.control_surface.ATTACHED_RESTART_POLL_SECONDS",
+        0.25,
+    )
+    monkeypatch.setattr(
+        "core.control_surface.time.monotonic",
+        lambda: clock["now"],
+    )
+    monkeypatch.setattr(
+        "core.control_surface.time.sleep",
+        lambda seconds: clock.__setitem__("now", clock["now"] + seconds),
+    )
+    service.status = statuses.__next__
+
+    result = service._wait_for_active_battle_reattachment(
+        replacement_pid=manager.pid,
+        handoff_id=pending["handoff_id"],
+        expected_identity="a" * 64,
+    )
+
+    assert result["control"]["process_restart_handoff"]["status"] == "completed"
+    assert clock["now"] == 1.25
+
+
 def test_failed_active_battle_start_leaves_replacement_paused(
     tmp_path,
     monkeypatch,

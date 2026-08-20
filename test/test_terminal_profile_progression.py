@@ -786,7 +786,7 @@ def test_shared_observation_fanout_isolates_consumer_exceptions(
     )
 
 
-def test_verified_same_battle_handoff_rebinds_metrics_before_projection():
+def test_verified_target_handoff_rebinds_metrics_before_projection():
     app = App.__new__(App)
     app._perk_save_monitor = None
     app._active_run_metric_monitor = Mock()
@@ -807,7 +807,7 @@ def test_verified_same_battle_handoff_rebinds_metrics_before_projection():
         acquisition,
         context=context,
         reason_code="forced_battle_identity",
-        verified_same_battle_target_handoff=True,
+        verified_target_handoff=True,
     )
 
     metric_monitor = app._active_run_metric_monitor
