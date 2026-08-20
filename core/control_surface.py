@@ -106,7 +106,7 @@ DEFAULT_STALE_AFTER_SECONDS = 180
 EMULATOR_DEGRADATION_CACHE_SECONDS = 60.0
 # Advance this when a newer Windows client must reload the resident service,
 # and advance that client's MinimumServerRevision in the same change.
-CONTROL_SURFACE_REVISION = 50
+CONTROL_SURFACE_REVISION = 51
 CONTROL_SURFACE_CAPABILITIES = (
     "active_battle_screen_metrics_v1",
     "active_battle_strategy_adoption",

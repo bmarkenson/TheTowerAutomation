@@ -1163,7 +1163,7 @@ supported capabilities. The Windows build carries an expected API version, a
 minimum server revision, and required capabilities. Any mismatch produces a
 prominent full-width **Linux API update required** banner, disables dependent
 actions, and gives disabled Start buttons the same blocker in a tooltip. The
-current Windows build requires revision 50, `bounded_idle_timeout_v1`,
+current Windows build requires revision 51, `bounded_idle_timeout_v1`,
 `active_battle_screen_metrics_v1`, `active_run_metrics_v1`,
 `current_battle_perks_v1`, `better_control_model_v2`,
 `runtime_control_acknowledgements_v1`,
@@ -1180,6 +1180,7 @@ current Windows build requires revision 50, `bounded_idle_timeout_v1`,
 `bluestacks_listener_lifetime_telemetry_v1`,
 `bluestacks_maintenance_policy_v1`,
 `managed_custom_module_presets_v1`,
+`paused_terminal_save_refresh_v1`,
 `strategy_authoring_local_loadout_editors_v1`,
 `strategy_authoring_preset_local_copy_v1`, and
 `strategy_revision_history_v1` while retaining all earlier required
