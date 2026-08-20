@@ -39,6 +39,27 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-20 In-client workflow guides
+
+- Exact implementation candidate `6809162` adds a modeless **Help > Workflow
+  guides…** window with version-matched topics for the independent control
+  layers, moving a running emulator between PCs, deciding whether and how to
+  restart BlueStacks, and editing/publishing a Strategy. Compact contextual
+  links select the matching topic from Connections, Diagnostics, and Strategy
+  Authoring without adding status-band content.
+- The structured guide catalog is packaged into the native executable and has
+  no API, process, emulator, control-directive, or publication owner. Its only
+  callback navigates to existing guarded surfaces, and Strategy Authoring
+  navigation preserves the normal compatibility/request-in-flight boundary.
+  The detailed repository runbooks remain canonical.
+- The native-client gate passed 26 focused Python/documentation tests, all 221
+  portable Control Surface tests, all 18 portable Tunnel Host tests, and the
+  Release WindowsDesktop cross-build with zero errors. Its only warnings were
+  the established read-only NuGet vulnerability-cache `NU1900`; the cross-build
+  is not Windows WPF runtime validation. Validation used development-
+  environment fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+
 ### 2026-08-19 Bounded idle timeout and fallback battle
 
 - Exact implementation candidate `a68edb2` makes ordinary idle intent bounded.
