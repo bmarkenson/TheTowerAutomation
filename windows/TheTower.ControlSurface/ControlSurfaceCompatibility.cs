@@ -59,7 +59,7 @@ internal static class ControlSurfaceCompatibility
     public const int RequiredApiVersion = 1;
     // Advance this when the client depends on the matching newer Linux
     // CONTROL_SURFACE_REVISION; older clients may retain a lower minimum.
-    public const int MinimumServerRevision = 49;
+    public const int MinimumServerRevision = 50;
 
     private static readonly string[] RequiredCapabilities =
     [
@@ -135,6 +135,17 @@ internal static class ControlSurfaceCompatibility
     public static bool CanOpenSaveMappingIntegration(
         ControlSurfaceCompatibilityResult? compatibility) =>
         compatibility?.IsCompatible == true;
+
+    public static bool IsActivePauseAcknowledged(
+        StatusResponse status,
+        bool processActive) =>
+        processActive
+        && string.Equals(
+            status.Control.State,
+            "PAUSED",
+            StringComparison.OrdinalIgnoreCase)
+        && status.Control.RemainingSeconds is null or > 0
+        && status.Acknowledgements.State is { AcknowledgesCurrent: true };
 
     public static BetterControlActionAvailability ResolveAttachAvailability(
         BetterControlActionAvailability serverAvailability,
