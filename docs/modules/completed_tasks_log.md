@@ -39,6 +39,50 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-20 Timed-Pause emulator handoff eligibility
+
+- Implementation commit `27e3800` aligns emulator-handoff eligibility with
+  the current Pause contract: an exact acknowledged Pause may be indefinite or
+  timed with an unexpired deadline. Expired timed directives and missing or
+  stale acknowledgements remain ineligible. The Linux API and native client
+  use the same rule, and the compatibility revision is now 50.
+- The implementation checkpoint passed all 3,079 Python tests, all 220 portable
+  Control Surface tests, focused documentation checks, and the Release
+  WindowsDesktop cross-build. After reconciling the concurrent production
+  outcome, exact integrated candidate `99e809f` passed 14 overlap-sensitive
+  Python/documentation checks, all 226 portable Control Surface tests, all 18
+  portable Tunnel Host tests, and the Release WindowsDesktop cross-build with
+  zero errors. The only build warnings were the established read-only NuGet
+  vulnerability-cache `NU1900`. Validation used development-environment
+  fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+- Production advanced from `c156e1a` to source/validation receipt `99e809f`
+  behind rollback tag `production-before-20260820T132231Z-c156e1a`. Revision
+  50 loaded successfully, and replacement PID `889343` reacquired
+  `localhost:5565`, forced a save, reattached exact same-battle identity
+  `4293705d`, and returned to acknowledged `RUNNING` with fresh screen and
+  target evidence. This deployment reattached the battle but did not perform a
+  live timed-Pause emulator move, so `ISSUE-2026-017` remains
+  `repair_awaiting_confirmation`.
+- The complete native package was published from exact production source
+  `99e809f` at 06:25 PDT. Current `TheTower.ControlSurface.exe` is 72,526,210
+  bytes with SHA-256
+  `b353c2f90de00d7055d653781690b956aa8dc4237c32eea613ee0055f6345f55`;
+  current `TheTower.TunnelHost.exe` is 35,172,109 bytes with SHA-256
+  `aa9c763daab9061f5801c221e2bd1e8a2011635a6df97959552d7af783584b3d`.
+  Retained slot 1 is the package published from source receipt `64dcb44`: its
+  Control Surface is 72,525,931 bytes with SHA-256
+  `4fd1035cd451bb430436c8cab637ee198990e6cd4fc7c99cf86b38580352126d`,
+  and its Tunnel Host is 35,172,131 bytes with SHA-256
+  `62579920880b102fc064270a20eec1f3423769c2c1e4c320d1f6181c9d848610`.
+  Retained slot 2 contains the 72,508,490-byte Control Surface
+  `61d74b4970eca827a36ac7f04b91fc3637ce98dcf2f67a96cf2c2ff540965f0f`
+  and 35,172,076-byte Tunnel Host
+  `47c39bc480301eb35a4fec054e3b9ffca06d792870b8753589f3f705d46c62e5`;
+  existing tracked receipts do not prove that slot's exact source commit.
+  Cross-publication does not establish Windows WPF runtime behavior; the real
+  timed-Pause button and handoff check remains pending on Windows.
+
 ### 2026-08-20 In-client workflow guides
 
 - Exact implementation candidate `6809162` adds a modeless **Help > Workflow
