@@ -81,6 +81,30 @@ resolved dossier instead of copying its detail.
   fingerprint
   `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
 
+### 2026-08-19 Same-battle metric continuity across emulator targets
+
+- Exact implementation candidate `05d2bd3` advances the active-run metric
+  monitor only from the existing verified emulator-handoff signal and that
+  handoff's forced destination save. It retains normalized whole-run and recent
+  rate evidence for the same canonical battle without persisting raw or decoded
+  saves; an ordinary same-battle refresh or passive read cannot change targets.
+- A non-regressing destination checkpoint keeps the recent interval across the
+  transition. A destination cloud rollback opens a fresh target epoch, keeps
+  destination whole-run rates current, and restores recent rates after the next
+  compatible destination checkpoint. Identical save bytes retain their prior
+  evidence age, missing destination claims cannot regress against the source
+  host, and mixed-target intervals are excluded from automatic destination-host
+  performance evidence. The following battle can bind normally on the new
+  target.
+- The runtime-Python candidate-gate row required the complete checkpoint. It
+  compiled all Python, validated state definitions and clickmap integrity with
+  zero errors and the established 44 orphan notices, and passed all 3,078
+  repository tests in 624.63 seconds using development-environment fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+  Focused active-metric, handoff-authority, shared-fanout, Perk, control-surface,
+  history, recovery, and documentation coverage also passed. Live handoff
+  confirmation remains routed through `ISSUE-2026-017`.
+
 ### 2026-08-19 Expected same-battle emulator-handoff wave rollback
 
 - Exact implementation candidate `42aebe7` accepts a lower destination
