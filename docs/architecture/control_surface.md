@@ -1392,7 +1392,13 @@ Process request examples:
   never starts, stops, or restarts automation or a tunnel. The application
   header groups four separately labelled Linux service, HTTP, API SSH, and ADB
   SSH signals and routes routine navigation through **View**, **Tools**, and
-  **Preferences** menus.
+  **Preferences**, plus a dedicated **Help** menu. **Help > Workflow
+  guides…** opens a modeless,
+  version-matched reference for the independent control layers, emulator-host
+  handoff, coordinated BlueStacks recovery, and Strategy authoring. Contextual
+  guide links select those same topics from Connections, Diagnostics, and
+  Strategy Authoring. The guide catalog has no API or device owner; it may only
+  navigate to existing surfaces, whose ordinary guards remain authoritative.
 - Preferences also contains the default-off BlueStacks recovery master, its
   independently retained lane/deferral options, and exact executable/instance
   settings. Enabling it permits automatic request creation only when Linux

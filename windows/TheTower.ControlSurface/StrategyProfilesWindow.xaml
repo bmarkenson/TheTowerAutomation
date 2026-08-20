@@ -18,11 +18,23 @@
       <RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
 
-    <StackPanel>
-      <TextBlock Text="Strategy Authoring" FontSize="22" FontWeight="SemiBold" />
-      <TextBlock Text="Edit sparse Base and Strategy source, review effective values and provenance, then publish. Strategy publication queues next-boundary use while the managed process is active or selects it for Start when stopped, without switching the current battle."
-                 Foreground="#93A4BB" TextWrapping="Wrap" Margin="0,5,0,0" />
-    </StackPanel>
+    <Grid>
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
+      <StackPanel Margin="0,0,18,0">
+        <TextBlock Text="Strategy Authoring" FontSize="22" FontWeight="SemiBold" />
+        <TextBlock Text="Edit sparse Base and Strategy source, review effective values and provenance, then publish. Strategy publication queues next-boundary use while the managed process is active or selects it for Start when stopped, without switching the current battle."
+                   Foreground="#93A4BB" TextWrapping="Wrap" Margin="0,5,0,0" />
+      </StackPanel>
+      <Button Grid.Column="1"
+              Content="Editing guide…"
+              Click="StrategyGuide_Click"
+              VerticalAlignment="Center"
+              Padding="10,6"
+              ToolTip="Open the read-only edit, validate, review, and publish workflow guide." />
+    </Grid>
 
     <Grid Grid.Row="1" Margin="0,16,0,12">
       <Grid.ColumnDefinitions>

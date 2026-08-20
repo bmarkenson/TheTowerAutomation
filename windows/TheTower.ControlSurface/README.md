@@ -83,6 +83,31 @@ rotation as the Windows publisher only after both builds succeed. The GUI
 project explicitly enables Windows targeting; copy the complete result
 directory to Windows for runtime testing.
 
+## Workflow guides
+
+**Help > Workflow guides…** opens one modeless, version-matched reference
+window that can remain visible while the operator uses the main client. Its
+initial topics cover how the independent control layers fit together, moving a
+running emulator between Windows PCs, recognizing and performing a coordinated
+BlueStacks restart, and editing/publishing a Strategy. **System >
+Connections**, **System > Diagnostics**, and **Strategy profiles…** provide
+small contextual guide buttons that select the matching topic.
+
+The guide catalog is packaged in the GUI executable and requires no HTTP or
+repository checkout. It is deliberately read-only: its navigation button may
+open Overview, Connections, Diagnostics, or the existing Strategy Authoring
+window, but it has no API client, emulator controller, process action, control
+directive, or publication path. The destination surfaces retain all ordinary
+availability, confirmation, acknowledgement, and authority guards.
+
+The concise topics are operator-facing projections, not competing contract
+owners. Detailed current procedures remain in
+[`managed_runtime.md`](../../docs/operations/managed_runtime.md), BlueStacks
+recovery authority remains in
+[`control_surface.md`](../../docs/architecture/control_surface.md#automatic-bluestacks-degradation-recovery),
+and Strategy editing semantics remain in
+[`strategy_authoring.md`](../../docs/architecture/strategy_authoring.md#gui-contract).
+
 ## Connect
 
 The GUI starts `TheTower.TunnelHost.exe` on demand and controls it through a
