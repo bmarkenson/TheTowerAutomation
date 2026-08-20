@@ -39,6 +39,58 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-20 Cell reserve and Lab Speedup planner
+
+- Exact implementation candidate `8fe3c90` makes the Cell reserve floor
+  independently editable in both control surfaces and adds optional normal and
+  reserve targets for each of five Labs. Revision 53 advertises
+  `lab_speed_reserve_planner_v1`; saving the planner updates durable policy and
+  the live warning floor only. The planner, tracker, and API retain false
+  automatic-application and UI-action-authority fields and never open Labs,
+  queue, buy, renew, or change a speedup.
+- The version-1101 cost model uses the observed one-hour prices for `1x`,
+  `1.5x`, and `2x` through `8x`, with `1x` meaning no renewal and the verified
+  8-hour/24-hour linear scaling. Forecasts compare each complete five-Lab plan
+  with total Cells divided by total real time across the newest 20 usable
+  representative battles. Current-run gross and observed account-balance net
+  remain separate, and a falling observed balance remains a warning even when
+  history predicts that a plan is sustainable.
+- Focused coverage passed 205 Python tests and all 236 portable .NET tests.
+  Browser JavaScript syntax, XAML parsing, Python compilation, and the Release
+  WindowsDesktop cross-build passed; .NET emitted only the established
+  read-only vulnerability-cache `NU1900` warnings. The runtime-input complete
+  checkpoint for exact candidate `8fe3c90` passed compilation,
+  state-definition validation, clickmap integrity with zero errors and the
+  established 44 orphan notices, and all 3,131 tests in 637.16 seconds using
+  development-environment fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+- Production advanced from `40bc4a2` to `8fe3c90` behind rollback tag
+  `production-before-20260820T224842Z-40bc4a2`. Guarded Stop retained handoff
+  `490523a2158b48a8b98ccfdc095f806f`; replacement PID `1934481` force-
+  reattached the identical active-battle identity on `localhost:5565`, restored
+  exact acknowledged `RUNNING` authority, and advanced to wave 3465. Revision
+  53 smoke showed 13,742,889 Cells, observed net `-12,588.46` Cells/hour, a
+  20-battle duration-weighted gross estimate of `338,814.95` Cells/hour, and no
+  saved reserve or Lab targets.
+- The complete native package was published from exact production source
+  `8fe3c90` at 15:52 PDT. Current `TheTower.ControlSurface.exe` is 72,554,622
+  bytes with SHA-256
+  `544a2d5cb15a6382836ef85c5c4050f44ebebe90dfcf8cbcf0527b9ae21bc23f`;
+  current `TheTower.TunnelHost.exe` is 35,172,096 bytes with SHA-256
+  `5888b382ed1d236ed11ee786719f35339d619bd9c7a60470154f3d331bd75a7e`.
+  Retained slot 1 is the package from source `f540853`: its 72,535,058-byte
+  Control Surface has SHA-256
+  `0d199b6ed7413c09c7f3785ba721e6c98ef2ed00209fb8e7a4e38b5f3e7fa536`
+  and its 35,172,142-byte Tunnel Host has SHA-256
+  `327527a1e1a7f63064379af44851fffd129b26ce7eb0a2baeca0631aa8ed0d83`.
+  Retained slot 2 has a 72,527,802-byte Control Surface with SHA-256
+  `5ce7c065ea1163f9d92e664e379206e260af5e3b4f3eab501ed36c73dadb4637`
+  and a 35,172,105-byte Tunnel Host with SHA-256
+  `23b455368a50438a13c8949aa5ee1c7d34353da5d8868d0d5caaba88ca5ef88c`;
+  no tracked receipt proves that slot's exact source commit. Cross-publication
+  does not establish Windows WPF runtime behavior; native Windows lifecycle
+  validation remains pending.
+
 ### 2026-08-20 durable Cell balance tracking
 
 - Exact implementation candidate `f540853` observes the version-1101 `cells`
