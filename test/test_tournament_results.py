@@ -7,6 +7,8 @@ from unittest.mock import call, patch
 import cv2
 
 from core.battle_lifecycle import HomeBattleControl
+from core.input import TapDispatchOutcome, TapDispatchStatus
+from core.label_tapper import is_visible
 from core.matcher import get_match
 from core.state_detector import detect_state_and_overlays
 from core.tournament_conditions import derive_tournament_conditions
@@ -69,7 +71,10 @@ def test_tournament_ok_verifier_is_bounded_to_the_terminal_dialog():
 
 def test_tournament_dismissal_taps_verified_ok_then_requires_new_battle_home():
     tournament = _load("tournament_stats_20260718.png")
+    tournament_home = _load("ui_state_20260714/home_tournament.png")
     home = tournament.copy()
+    action_guard = lambda: True
+    assert is_visible("buttons.return_to_game", screenshot=tournament_home)
 
     def verified_tap(point, **kwargs):
         assert kwargs["verification"].authorizes(tuple(point))
@@ -83,7 +88,11 @@ def test_tournament_dismissal_taps_verified_ok_then_requires_new_battle_home():
         ) as tap,
         patch(
             "handlers.tournament_result_handler.detect_state_and_overlays",
-            return_value={"state": "HOME_SCREEN"},
+            side_effect=(
+                {"state": "TOURNAMENT_RESULTS"},
+                {"state": "TOURNAMENT_SCREEN"},
+                {"state": "HOME_SCREEN"},
+            ),
         ),
         patch(
             "handlers.tournament_result_handler.detect_home_battle_control",
@@ -91,15 +100,67 @@ def test_tournament_dismissal_taps_verified_ok_then_requires_new_battle_home():
                 control=HomeBattleControl.NEW_BATTLE
             ),
         ),
+        patch(
+            "handlers.tournament_result_handler.tap_if_visible",
+            return_value=TapDispatchOutcome(TapDispatchStatus.DISPATCHED),
+        ) as return_to_game,
     ):
         dismissed = dismiss_tournament_results_to_home(
-            action_guard_fn=lambda: True,
-            capture_fn=iter([tournament, home]).__next__,
+            action_guard_fn=action_guard,
+            capture_fn=iter([tournament, tournament_home, home]).__next__,
             sleep_fn=lambda _seconds: None,
         )
 
     assert dismissed is True
     tap.assert_called_once()
+    return_to_game.assert_called_once_with(
+        "buttons.return_to_game",
+        screenshot=tournament_home,
+        retries=0,
+        failure_log_level="DEBUG",
+        action_guard_fn=action_guard,
+        return_dispatch_outcome=True,
+    )
+
+
+def test_tournament_home_retry_uses_return_strip_without_repeating_results_ok():
+    tournament_home = _load("ui_state_20260714/home_tournament.png")
+    home = tournament_home.copy()
+    action_guard = lambda: True
+
+    with (
+        patch(
+            "handlers.tournament_result_handler.detect_state_and_overlays",
+            side_effect=(
+                {"state": "TOURNAMENT_SCREEN"},
+                {"state": "TOURNAMENT_SCREEN"},
+                {"state": "HOME_SCREEN"},
+            ),
+        ),
+        patch(
+            "handlers.tournament_result_handler.detect_home_battle_control",
+            return_value=SimpleNamespace(
+                control=HomeBattleControl.NEW_BATTLE
+            ),
+        ),
+        patch(
+            "handlers.tournament_result_handler.safe_tap",
+        ) as results_ok,
+        patch(
+            "handlers.tournament_result_handler.tap_if_visible",
+            return_value=TapDispatchOutcome(TapDispatchStatus.DISPATCHED),
+        ) as return_to_game,
+    ):
+        dismissed = dismiss_tournament_results_to_home(
+            action_guard_fn=action_guard,
+            capture_fn=iter([tournament_home, tournament_home, home]).__next__,
+            sleep_fn=lambda _seconds: None,
+        )
+
+    assert dismissed is True
+    results_ok.assert_not_called()
+    return_to_game.assert_called_once()
+    assert return_to_game.call_args.kwargs["action_guard_fn"] is action_guard
 
 
 def test_tournament_summary_ocr_tracks_rank_and_coin_split():

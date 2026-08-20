@@ -4597,8 +4597,10 @@ class ControlSurfaceService:
 
         deadline = time.monotonic() + ATTACHED_RESTART_TIMEOUT_SECONDS
         last_missing: list[str] = []
+        observed_progress: Optional[set[str]] = None
         while True:
             status = self.status()
+            observed_at = time.monotonic()
             process = status.get("process_service") or {}
             runtime = status.get("runtime") or {}
             control = status.get("control") or {}
@@ -4676,6 +4678,53 @@ class ControlSurfaceService:
                 .get("available")
                 is True
             )
+            workflow_configuration = (
+                workflow.get("configuration")
+                if isinstance(workflow, Mapping)
+                else None
+            )
+            progress = {
+                milestone
+                for milestone, reached in (
+                    (
+                        "replacement_process",
+                        process.get("active") is True
+                        and process.get("main_pid") == replacement_pid,
+                    ),
+                    ("replacement_adb_lock", matching_owner),
+                    (
+                        "attach_workflow_bound",
+                        bool((handoff or {}).get("workflow_id")),
+                    ),
+                    ("forced_identity", bool(actual_identity)),
+                    ("handoff_identity", bool(handoff_actual_identity)),
+                    ("battle_relation", bool(handoff_relation)),
+                    ("enabled_authority", authority_enabled),
+                    ("adopted_lifecycle", attachment_available),
+                    ("completed", completed),
+                )
+                if reached
+            }
+            workflow_status = str((workflow or {}).get("status") or "").strip()
+            if workflow_status:
+                progress.add(f"workflow_status:{workflow_status}")
+            workflow_stage = str(
+                workflow_configuration.get("stage")
+                if isinstance(workflow_configuration, Mapping)
+                else ""
+            ).strip()
+            if workflow_stage:
+                progress.add(f"workflow_stage:{workflow_stage}")
+            if observed_progress is None:
+                observed_progress = progress
+            elif not progress.issubset(observed_progress):
+                # Forced-save identity and Attach adoption are a multi-stage
+                # workflow. Give each observed forward transition a full
+                # bounded settlement interval instead of applying one wall-
+                # clock deadline to the entire replacement lifecycle. Retain
+                # reached milestones so state flapping cannot extend forever.
+                observed_progress.update(progress)
+                deadline = observed_at + ATTACHED_RESTART_TIMEOUT_SECONDS
             last_missing = []
             if not (
                 process.get("active") is True
@@ -4692,7 +4741,7 @@ class ControlSurfaceService:
                 last_missing.append("adopted active-battle lifecycle")
             if not last_missing:
                 return status
-            if time.monotonic() >= deadline:
+            if observed_at >= deadline:
                 raise AutomationProcessError(
                     "Replacement remained safe but active-battle reattachment "
                     "timed out waiting for: " + ", ".join(last_missing)
