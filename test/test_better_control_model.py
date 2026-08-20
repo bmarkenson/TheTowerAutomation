@@ -146,7 +146,7 @@ def test_terminal_idle_timeout_routes_home_then_requests_fallback_start(
     assert status["terminal_idle_timeout"] is None
 
 
-def test_new_operator_control_cancels_terminal_idle_timeout(tmp_path):
+def test_new_operator_control_consumes_terminal_idle_timeout(tmp_path):
     store = ControlDirectiveStore(tmp_path / "automation_ctl.json")
     store.set_state("RUNNING", source="test")
     store.set_mode("HOME", source="test")
@@ -158,6 +158,7 @@ def test_new_operator_control_cancels_terminal_idle_timeout(tmp_path):
 
     store.set_mode("WAIT", source="operator")
     assert store.status()["terminal_idle_timeout"] is None
+    assert store.status()["mode"] == "WAIT"
 
     store.activate_terminal_idle_timeout(
         evidence=_evidence(game_state="home_new_battle", observation_id="runtime-1:2"),
@@ -166,6 +167,7 @@ def test_new_operator_control_cancels_terminal_idle_timeout(tmp_path):
     )
     store.set_state("PAUSED", source="operator")
     assert store.status()["terminal_idle_timeout"] is None
+    assert store.status()["mode"] == "NEXT_BATTLE"
 
     store.set_state("RUNNING", source="operator")
     store.set_mode("HOME", source="operator")
@@ -176,6 +178,32 @@ def test_new_operator_control_cancels_terminal_idle_timeout(tmp_path):
     )
     store.set_strategy("farm_t18", source="operator")
     assert store.status()["terminal_idle_timeout"] is None
+    assert store.status()["mode"] == "NEXT_BATTLE"
+
+
+def test_explicit_start_consumes_held_terminal_policy(tmp_path):
+    store = ControlDirectiveStore(tmp_path / "automation_ctl.json")
+    store.set_state("RUNNING", source="test")
+    store.set_mode("HOME", source="test")
+    assert store.activate_terminal_idle_timeout(
+        evidence=_evidence(game_state="home_new_battle"),
+        strategy="farm_t19",
+        now=1_000.0,
+    )
+
+    workflow = store.request_battle_workflow(
+        "start_battle",
+        evidence=_evidence(
+            game_state="home_new_battle",
+            observation_id="runtime-1:2",
+        ),
+        strategy="farm_t19",
+        source="operator",
+    )
+
+    assert workflow["strategy"] == "farm_t19"
+    assert store.status()["terminal_idle_timeout"] is None
+    assert store.status()["mode"] == "NEXT_BATTLE"
 
 
 def test_runtime_arms_terminal_idle_timeout_from_fresh_wait_boundary():

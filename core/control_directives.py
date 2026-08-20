@@ -137,6 +137,23 @@ def normalize_terminal_idle_timeout(value: object) -> Optional[dict[str, Any]]:
     }
 
 
+def _consume_terminal_idle_timeout(
+    data: dict[str, Any],
+    *,
+    timestamp: str,
+) -> bool:
+    """Clear a consumed hold and retire its one-shot future policy."""
+
+    hold = normalize_terminal_idle_timeout(data.get("terminal_idle_timeout"))
+    data.pop("terminal_idle_timeout", None)
+    if hold is None:
+        return False
+    data["mode"] = "NEXT_BATTLE"
+    data["mode_updated_at"] = timestamp
+    data["mode_request_id"] = uuid4().hex
+    return True
+
+
 def _emulator_location_text(value: object, maximum: int) -> Optional[str]:
     if not isinstance(value, str):
         return None
@@ -783,15 +800,14 @@ class ControlDirectiveStore:
                     workflow_strategy_definition_fingerprint
                 )
             data["battle_workflow"] = workflow
-            data.pop("terminal_idle_timeout", None)
-            if (
-                terminal_timeout is not None
-                or normalized_timed_pause_state_id is not None
-            ):
+            hold_consumed = _consume_terminal_idle_timeout(
+                data,
+                timestamp=timestamp,
+            )
+            if normalized_timed_pause_state_id is not None and not hold_consumed:
                 data["mode"] = "NEXT_BATTLE"
                 data["mode_updated_at"] = timestamp
                 data["mode_request_id"] = uuid4().hex
-                data.pop("terminal_idle_timeout", None)
             if restart_handoff is not None:
                 restart_handoff["workflow_id"] = workflow["request_id"]
                 restart_handoff["updated_at"] = timestamp
@@ -1020,7 +1036,7 @@ class ControlDirectiveStore:
             data["manual_control"] = manual
             data["state"] = "PAUSED"
             data.pop("resume_at", None)
-            data.pop("terminal_idle_timeout", None)
+            _consume_terminal_idle_timeout(data, timestamp=timestamp)
             data["state_updated_at"] = timestamp
             data["state_request_id"] = uuid4().hex
             data["updated_at"] = timestamp
@@ -2092,7 +2108,7 @@ class ControlDirectiveStore:
             timestamp = _updated_at()
             data["state"] = normalized
             data.pop("resume_at", None)
-            data.pop("terminal_idle_timeout", None)
+            _consume_terminal_idle_timeout(data, timestamp=timestamp)
             if deadline is not None:
                 data["resume_at"] = deadline
             data["updated_at"] = timestamp
@@ -2123,7 +2139,7 @@ class ControlDirectiveStore:
             timestamp = _updated_at()
             data["state"] = "PAUSED"
             data.pop("resume_at", None)
-            data.pop("terminal_idle_timeout", None)
+            _consume_terminal_idle_timeout(data, timestamp=timestamp)
             if deadline is not None:
                 data["resume_at"] = deadline
             data["updated_at"] = timestamp
@@ -2224,7 +2240,7 @@ class ControlDirectiveStore:
                     data["process_restart_handoff"] = handoff
             data["state"] = normalized
             data.pop("resume_at", None)
-            data.pop("terminal_idle_timeout", None)
+            _consume_terminal_idle_timeout(data, timestamp=timestamp)
             data["state_updated_at"] = timestamp
             data["state_request_id"] = uuid4().hex
             data["updated_at"] = timestamp
@@ -2716,7 +2732,7 @@ class ControlDirectiveStore:
             previous = self._valid_strategy(data.get("strategy"))
             strategy_request_id = uuid4().hex
             data["strategy"] = normalized
-            data.pop("terminal_idle_timeout", None)
+            _consume_terminal_idle_timeout(data, timestamp=timestamp)
             data["strategy_apply_mode"] = normalized_apply_mode
             if normalized_apply_mode == "active_battle":
                 data["strategy_active_battle_identity"] = (

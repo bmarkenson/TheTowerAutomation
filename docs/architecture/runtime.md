@@ -1322,9 +1322,10 @@ for continued battle retry.
   holds are one-shot and expire 30 minutes after fresh terminal/Home evidence;
   expiry resets the future disposition to `NEXT_BATTLE` and requests a guarded
   Home launch with `farm_t19_ad_assist`. Exact state/mode request identities
-  bind the timer, and newer Pause, Stop, manual-control, Strategy, or workflow
-  intent cancels it. Legacy `RETRY` values normalize to `NEXT_BATTLE` at the
-  persistence boundary.
+  bind the timer. Newer Pause, Stop, manual-control, Strategy, or workflow
+  intent consumes it and resets the future disposition to `NEXT_BATTLE`; a
+  newer terminal-policy request replaces it. Legacy `RETRY` values normalize
+  to `NEXT_BATTLE` at the persistence boundary.
 - Visible navigation and battle lifecycle are separate. Home
   `RESUME_BATTLE` preserves the current battle identity; `GAME_OVER`,
   `TOURNAMENT_RESULTS`, or a verified Home `NEW_BATTLE` ends it.

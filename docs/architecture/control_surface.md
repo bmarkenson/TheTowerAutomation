@@ -372,11 +372,13 @@ fresh supported terminal or Home New observation. The hold is bound to the
 exact state and mode request identities. At 30 minutes it routes terminal
 screens through Home and atomically creates an ordinary Start Battle workflow
 for `farm_t19_ad_assist`; that workflow owns the same save, setup, tier, and
-first-Running identity gates as an operator Start. An explicit state, policy,
-Strategy, manual-control, or battle-workflow write clears the old hold. A timed
-Pause that expires during an active battle resumes that same battle instead of
-switching Strategy; if it expires at Home New, it creates the same fallback
-Start workflow. Indefinite safety and manual-control pauses never expire.
+first-Running identity gates as an operator Start. An explicit state, Strategy,
+manual-control, or battle-workflow write consumes the hold and resets the future
+policy to Continue; an explicit policy write replaces it with that newer
+policy. A timed Pause that expires during an active battle resumes that same
+battle instead of switching Strategy; if it expires at Home New, it creates
+the same fallback Start workflow. Indefinite safety and manual-control pauses
+never expire.
 
 The API retains `resume` as a deprecated alias for `enable` and the old
 directive-only `stop` for internal coordination compatibility. The latter sets
