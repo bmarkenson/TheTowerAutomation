@@ -39,6 +39,33 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-20 Reviewed Tournament Orb Distance mapping and preset
+
+- Exact implementation candidate `f8a4b5d` accepts the paired version-1101
+  observation as one complete Range-bound Orb Distance tuple. Both the
+  version-1073 authority and version-1101 structural mirror now map raw centers
+  Extra `8.0` / Workshop `6.0` to displayed
+  `98.38m / 80.37m / 60.00m`; the prior
+  `98.38m / 87.16m / 80.37m` tuple remains canonical.
+- The `tournament_range_98_38` preset now selects the reviewed tuple. The
+  supported generator refreshed the bundled Tournament plan and the Farm
+  plans' shared Range relationships. Receipt-status reconciliation reports a
+  reviewed Orb field as `integrated` only when its exact paired tuple is
+  present in both canonical mapping owners.
+- Durable receipts
+  `876b632aed9fb6162c381e434e9ef89aad2c0a5f5c1f3f3bfa57b953c17f1363`
+  and
+  `b6c451d155547c7d8b93552fe82ffee8d480cc6cb0f3e48ec0402294802d6c31`
+  were neither rewritten nor dismissed. The retained receipt store remained
+  byte-for-byte unchanged at SHA-256
+  `24e5d46c27100c7d858d67589e4c2ec1622e56740d6f061a31033a06d5c2a203`.
+- Focused mapping, candidate-status, generated-plan, Tournament, and Orb
+  Distance validation passed. The runtime-input checkpoint for exact candidate
+  `f8a4b5d` passed compilation, state-definition validation, clickmap integrity
+  with zero errors and the established 44 orphan notices, and all 3,085 tests
+  in 695.92 seconds. Validation used development-environment fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+
 ### 2026-08-20 Timed-Pause emulator handoff eligibility
 
 - Implementation commit `27e3800` aligns emulator-handoff eligibility with
