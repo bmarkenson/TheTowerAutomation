@@ -1374,6 +1374,9 @@ class App:
             context=context,
             reason_code="forced_battle_identity",
             bind_new_activity=(relation is not BattleIdentityRelation.SAME_BATTLE),
+            verified_same_battle_target_handoff=(
+                relation is BattleIdentityRelation.SAME_BATTLE
+            ),
         )
 
         workflow = getattr(
@@ -1867,6 +1870,7 @@ class App:
         reason_code: str,
         observe_perks: bool = True,
         bind_new_activity: bool = False,
+        verified_same_battle_target_handoff: bool = False,
     ) -> None:
         """Deliver one immutable parsed bundle to every eligible consumer."""
 
@@ -1924,13 +1928,21 @@ class App:
                         )
                 if metric_monitor is not None:
                     try:
-                        metric_bound = bool(
-                            not bind_new_activity
-                            or metric_monitor.bind_context(
-                                context,
-                                new_activity=True,
+                        if verified_same_battle_target_handoff:
+                            metric_bound = bool(
+                                metric_monitor.continue_same_battle_at_target(
+                                    context,
+                                    acquisition=acquisition,
+                                )
                             )
-                        )
+                        else:
+                            metric_bound = bool(
+                                not bind_new_activity
+                                or metric_monitor.bind_context(
+                                    context,
+                                    new_activity=True,
+                                )
+                            )
                         if metric_bound:
                             disposition = metric_monitor.observe_bundle(
                                 acquisition,

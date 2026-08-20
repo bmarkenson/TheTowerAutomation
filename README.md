@@ -259,7 +259,10 @@ OCR Coins/min and shows whole-run cells/hour, waves/hour, effective speed, plus
 checkpoint provenance only while
 fresh exact runtime ownership and the same forced-save round identity still
 prove the active battle. A mismatched save source, identity transition, or
-lost status connection hides the live row instead of retaining old values.
+lost status connection hides the live row instead of retaining old values. A
+forced target handoff that proves the same battle carries this timeline to the
+destination; a cloud rollback keeps destination whole-run rates while recent
+rates restart from the first destination checkpoint.
 
 An unbound terminal, absent or UI-sourced baseline, unsupported version,
 unchanged or invalid tail transition, unknown death cause, changed shape, or

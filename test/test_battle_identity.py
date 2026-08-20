@@ -1696,6 +1696,33 @@ def test_running_start_binds_forced_identity_before_completion(tmp_path):
     )
 
 
+def test_same_battle_forced_bundle_marks_verified_metric_target_handoff():
+    app = App.__new__(App)
+    identity = _identity()
+    acquisition = _acquisition(identity, target_generation=8)
+    app._player_save_runtime_session_id = "runtime-1"
+    app._current_run_scope_id = Mock(return_value="scope-1")
+    app._publish_player_save_observation = Mock()
+    app._supervisor = SimpleNamespace(
+        battle_workflow=None,
+        manual_control=None,
+    )
+
+    app._publish_forced_battle_identity_bundle(
+        acquisition,
+        relation=BattleIdentityRelation.SAME_BATTLE,
+        identity_fingerprint=identity.fingerprint,
+    )
+
+    app._publish_player_save_observation.assert_called_once()
+    call = app._publish_player_save_observation.call_args
+    assert call.args == (acquisition,)
+    assert call.kwargs["context"].target_binding == acquisition.binding
+    assert call.kwargs["reason_code"] == "forced_battle_identity"
+    assert call.kwargs["bind_new_activity"] is False
+    assert call.kwargs["verified_same_battle_target_handoff"] is True
+
+
 def test_home_resume_dispatch_makes_identity_non_authoritative_until_running():
     app = App.__new__(App)
     retained = object()

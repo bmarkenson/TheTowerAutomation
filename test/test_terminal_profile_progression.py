@@ -784,3 +784,43 @@ def test_shared_observation_fanout_isolates_consumer_exceptions(
         acquisition,
         reason_code="passive_interval",
     )
+
+
+def test_verified_same_battle_handoff_rebinds_metrics_before_projection():
+    app = App.__new__(App)
+    app._perk_save_monitor = None
+    app._active_run_metric_monitor = Mock()
+    app._active_run_metric_monitor.continue_same_battle_at_target.return_value = (
+        True
+    )
+    app._active_run_metric_monitor.observe_bundle.return_value = (
+        "accepted_checkpoint"
+    )
+    app._player_save_audit_collector = None
+    app._battle_identity_store = None
+    app._bind_survival_activation_tracker = Mock(return_value=False)
+    app._log_active_run_metric_summary = Mock()
+    context = object()
+    acquisition = object()
+
+    app._publish_player_save_observation(
+        acquisition,
+        context=context,
+        reason_code="forced_battle_identity",
+        verified_same_battle_target_handoff=True,
+    )
+
+    metric_monitor = app._active_run_metric_monitor
+    metric_monitor.continue_same_battle_at_target.assert_called_once_with(
+        context,
+        acquisition=acquisition,
+    )
+    metric_monitor.bind_context.assert_not_called()
+    metric_monitor.observe_bundle.assert_called_once_with(
+        acquisition,
+        context=context,
+    )
+    app._log_active_run_metric_summary.assert_called_once_with(
+        metric_monitor,
+        context,
+    )

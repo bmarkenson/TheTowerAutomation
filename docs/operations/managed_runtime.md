@@ -525,6 +525,13 @@ available. Completed Battle History preserves that timeline.
 This exclusion is intentional: measurements from two PCs or an unknown opening
 segment must not train one PC's performance model.
 
+Live save-backed status rates are continuous across a forced handoff only when
+the destination save proves the same canonical battle. A cross-target recent
+interval may remain visible to the operator, but it is not destination-host
+performance evidence; automatic calibration waits for fresh destination-only
+intervals. A destination cloud rollback preserves whole-run rates and begins a
+new recent interval segment.
+
 #### Why **Use this PC's emulator** may be disabled
 
 Hover the disabled button for its current blocker. The button requires all of

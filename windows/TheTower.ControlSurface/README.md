@@ -319,11 +319,15 @@ when it is not the normal `Observed` state. These fields reuse passive
 status polling never acquires or forces a save and never turns OCR Coins/min
 into realized CPH. The metric projection, authority snapshot, and structured
 observation must carry the same forced-save round identity, and its rates must
-come from one newest save source. Temporary same-battle screen navigation does
-not clear the screen or save projections. An identity or source mismatch,
-process or authority loss, battle end, or failed status poll clears them. A
-partial or conflicted checkpoint clears each unproved rate instead of retaining
-its older value. No
+come from one newest save source. A forced emulator handoff that proves the
+same battle carries the metric timeline to the destination target. A forward
+destination checkpoint may extend the recent interval across the handoff; a
+cloud rollback keeps current destination whole-run rates and restarts only the
+recent interval until another destination checkpoint arrives. Temporary same-
+battle screen navigation does not clear the screen or save projections. An
+identity or source mismatch, process or authority loss, battle end, or failed
+status poll clears them. A partial or conflicted checkpoint clears each
+unproved rate instead of retaining its older value. No
 expected duration, Peak Coins/min, requirement comparison, recovery countdown,
 or Return/Extend/Cancel recovery control is synthesized before a versioned
 status field and guarded runtime directive own it.

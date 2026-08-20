@@ -1429,12 +1429,16 @@ Process request examples:
   or forced write and does not change the independent passive cadence. The
   runtime projection, authority snapshot, and structured observation must all
   carry the same forced-save active-round identity, and every displayed rate
-  must belong to the newest single-source checkpoint. Temporary navigation
-  away from the battle screen does not clear either projection while fresh
-  exact-owner evidence still proves that same active round. The server clears
-  them on owner, freshness, active-round, or identity loss; the native client
-  also clears them on a failed status poll. Partial or conflicted checkpoints
-  omit rates they do not currently prove. Expected duration, active Peak Coins/min,
+  must belong to the newest single-source checkpoint. A forced target handoff
+  that proves the same battle advances this projection without discarding its
+  timeline; a non-regressing destination checkpoint can supply the next recent
+  interval across the transition, while a cloud rollback starts a fresh recent
+  interval and keeps destination whole-run rates. Temporary navigation away
+  from the battle screen does not clear either projection while fresh exact-
+  owner evidence still proves that same active round. The server clears them
+  on owner, freshness, active-round, or identity loss; the native client also
+  clears them on a failed status poll. Partial or conflicted checkpoints omit
+  rates they do not currently prove. Expected duration, active Peak Coins/min,
   expected-versus-observed requirement detail, recovery countdowns, and
   Return/Extend/Cancel recovery actions remain absent until their owning
   runtime status fields and guarded directives exist.

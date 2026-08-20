@@ -504,9 +504,14 @@ allowlist and retained evidence are in
 
 `ActiveRunMetricMonitor` consumes the same typed stable bundle already acquired
 for the Perk monitor and optional campaign auditor; it never requests a save
-read or sends input. It binds each accepted component to process, ADB target
-generation, active-round identity, mapping, and audit ID. Activity scope may be
-carried as report metadata, but it does not participate in equality or authority.
+read or sends input. Ordinary observations bind each accepted component to
+process, exact ADB target generation, active-round identity, mapping, and audit
+ID. One explicit exception advances that target binding: after the battle-
+identity coordinator classifies a forced destination save as the same battle,
+the monitor retains the normalized timeline and consumes that same bundle at
+the destination. Passive reads cannot create this bridge. Activity scope may
+be carried as report metadata, but it does not participate in equality or
+authority.
 `saveRevision` remains diagnostic only. Capture order, source identity, wave,
 and nondecreasing cumulative values own monotonic acceptance. Every direct leaf
 retains its own definition and latest valid timed baseline. A malformed or
@@ -514,6 +519,19 @@ regressed leaf conflicts only that timeline and its derived dependents; sibling
 leaves continue, and a later recovery computes its interval from the latest
 prior checkpoint that contained the required leaf/time evidence. Component
 status is an aggregate presentation, not an authority unit.
+
+When the forced destination checkpoint is non-regressing, its interval may
+span the verified same-battle target transition so live whole-run and recent
+rates remain current. Such a mixed-target interval is operator-visible but is
+excluded from the destination host's automatic performance evidence. When a
+cloud save resumes behind any retained wave or cumulative tally, the
+destination checkpoint remains a valid whole-run sample but opens a fresh
+monotonic interval segment; recent rates return after the next compatible
+destination checkpoint. The retained pre-handoff samples remain available for
+diagnostics and terminal evidence, while current status uses only a checkpoint
+from the exact destination binding. This continuity is process-local normalized
+evidence: it writes no raw or decoded save and does not infer metrics across an
+automation-process replacement.
 
 Every economy checkpoint records whole-run CPH, cells/hour, cash/hour,
 waves/hour, and effective speed from the cumulative tallies and real/game time.

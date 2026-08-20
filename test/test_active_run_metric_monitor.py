@@ -1873,3 +1873,265 @@ def test_new_activity_resets_evidence_but_target_change_does_not_rebind():
         _context(activity="scope-3", generation=5, identity="c" * 64),
         new_activity=True,
     )
+
+
+def test_forced_same_battle_handoff_continues_nonregressing_interval_rates():
+    monitor = ActiveRunMetricMonitor()
+    identity = _sha("round-1")
+    source = _context(generation=4, identity=identity)
+    destination = _context(generation=5, identity=identity)
+    first = _checkpoint(
+        10,
+        offset=100,
+        wave=100,
+        real=100,
+        game=500,
+        coins=1000,
+        cells=100,
+        cash=500,
+        progress=10,
+        coin_source=100,
+        resource=20,
+    )
+    second = _checkpoint(
+        11,
+        offset=200,
+        wave=200,
+        real=200,
+        game=1000,
+        coins=3000,
+        cells=300,
+        cash=900,
+        progress=20,
+        coin_source=400,
+        resource=60,
+    )
+    destination_checkpoint = _checkpoint(
+        12,
+        offset=300,
+        wave=300,
+        real=300,
+        game=1500,
+        coins=6000,
+        cells=600,
+        cash=1200,
+        progress=30,
+        coin_source=800,
+        resource=120,
+    )
+
+    assert _observe(monitor, first, context=source) == "accepted_checkpoint"
+    assert _observe(monitor, second, context=source) == "accepted_checkpoint"
+    acquisition = replace(
+        _acquisition(destination_checkpoint, context=destination),
+        acquisition_type=PlayerSaveAcquisitionType.FORCED_SERIALIZATION,
+    )
+
+    assert monitor.continue_same_battle_at_target(
+        destination,
+        acquisition=acquisition,
+    )
+    assert monitor.observe_bundle(
+        acquisition,
+        context=destination,
+    ) == "accepted_checkpoint"
+
+    summary = monitor.latest_summary(destination)
+    assert summary is not None
+    assert summary["target_binding_fingerprint"] == (
+        destination.target_binding.fingerprint
+    )
+    assert summary["interval"]["coins_per_hour"] == "108000"
+    evidence = monitor.terminal_evidence(
+        context=destination,
+        terminal_save_report=None,
+    )
+    assert evidence["target_handoffs"][-1]["interval_continuity"] == (
+        "continued"
+    )
+    assert {
+        sample["target_binding_fingerprint"]
+        for sample in evidence["components"]["economy"]["samples"]
+    } == {
+        source.target_binding.fingerprint,
+        destination.target_binding.fingerprint,
+    }
+    assert evidence["components"]["economy"]["samples"][-1][
+        "interval_target_binding"
+    ] == "same_battle_handoff"
+    performance = monitor.performance_evidence(destination)
+    assert performance is not None
+    assert performance["checkpoints"] == []
+    next_battle = _context(generation=5, identity="b" * 64)
+    assert monitor.bind_context(next_battle, new_activity=True)
+    assert monitor.latest_summary(next_battle) is None
+
+
+def test_forced_same_battle_handoff_restarts_interval_after_cloud_rollback():
+    monitor = ActiveRunMetricMonitor()
+    identity = _sha("round-1")
+    source = _context(generation=4, identity=identity)
+    destination = _context(generation=5, identity=identity)
+    source_checkpoint = _checkpoint(
+        20,
+        offset=500,
+        wave=500,
+        real=500,
+        game=2500,
+        coins=5000,
+        cells=1000,
+        cash=1000,
+        progress=50,
+        coin_source=2000,
+        resource=200,
+    )
+    rolled_back = _checkpoint(
+        21,
+        offset=600,
+        wave=480,
+        real=480,
+        game=2400,
+        coins=4800,
+        cells=480,
+        cash=960,
+        progress=48,
+        coin_source=960,
+        resource=192,
+    )
+    rolled_back_tallies = rolled_back.active_tallies
+    assert rolled_back_tallies is not None
+    rolled_back_components = []
+    for component in rolled_back_tallies.components:
+        if component.name == "economy":
+            component = replace(
+                component,
+                status="partial",
+                reason="one_or_more_tally_claims_unavailable",
+                metrics=tuple(
+                    metric
+                    for metric in component.metrics
+                    if metric[0] != "cells_earned"
+                ),
+                unavailable=(("cells_earned", "temporary_unavailable"),),
+            )
+        elif component.name == "coin_sources":
+            component = replace(
+                component,
+                status="unavailable",
+                reason="all_tally_claims_unavailable",
+                metrics=(),
+                derived=(),
+                unavailable=tuple(
+                    (name, "temporary_unavailable")
+                    for name, _definition in component.claim_definitions
+                ),
+            )
+        rolled_back_components.append(component)
+    rolled_back = replace(
+        rolled_back,
+        active_tallies=replace(
+            rolled_back_tallies,
+            status="partial",
+            reason="one_or_more_active_tally_claims_unavailable",
+            components=tuple(rolled_back_components),
+        ),
+        active_tallies_status="partial",
+    )
+    destination_later = _checkpoint(
+        22,
+        offset=700,
+        wave=520,
+        real=520,
+        game=2600,
+        coins=6000,
+        cells=600,
+        cash=1040,
+        progress=52,
+        coin_source=1200,
+        resource=240,
+    )
+
+    assert _observe(
+        monitor,
+        source_checkpoint,
+        context=source,
+    ) == "accepted_checkpoint"
+    acquisition = replace(
+        _acquisition(rolled_back, context=destination),
+        acquisition_type=PlayerSaveAcquisitionType.FORCED_SERIALIZATION,
+    )
+    assert monitor.continue_same_battle_at_target(
+        destination,
+        acquisition=acquisition,
+    )
+    assert monitor.observe_bundle(
+        acquisition,
+        context=destination,
+    ) == "accepted_partial_checkpoint"
+
+    rolled_back_summary = monitor.latest_summary(destination)
+    assert rolled_back_summary is not None
+    assert rolled_back_summary["saved_wave"] == 480
+    assert rolled_back_summary["whole_run"]["coins_per_hour"] == "36000"
+    assert rolled_back_summary["interval"] is None
+
+    assert _observe(
+        monitor,
+        destination_later,
+        context=destination,
+    ) == "accepted_checkpoint"
+    current = monitor.latest_summary(destination)
+    assert current is not None
+    assert current["interval"]["coins_per_hour"] == "108000"
+    assert current["interval"]["waves_per_hour"] == "3600"
+    assert current["whole_run"]["cells_earned"] == "600"
+    evidence = monitor.terminal_evidence(
+        context=destination,
+        terminal_save_report=None,
+    )
+    assert evidence["target_handoffs"][-1]["interval_continuity"] == (
+        "restarted_after_destination_rollback"
+    )
+    assert evidence["components"]["economy"]["metric_conflicts"] == {}
+    assert evidence["components"]["coin_sources"]["metric_conflicts"] == {}
+    assert evidence["components"]["coin_sources"]["samples"][-1][
+        "metrics"
+    ]["coins_from_black_hole"] == "1200"
+
+
+def test_same_battle_target_continuation_rejects_passive_or_wrong_identity():
+    monitor = ActiveRunMetricMonitor()
+    identity = _sha("round-1")
+    source = _context(generation=4, identity=identity)
+    destination = _context(generation=5, identity=identity)
+    checkpoint = _checkpoint(
+        10,
+        offset=100,
+        wave=100,
+        real=100,
+        game=500,
+        coins=1000,
+        cells=100,
+        cash=500,
+        progress=10,
+        coin_source=100,
+        resource=20,
+    )
+    assert _observe(monitor, checkpoint, context=source) == "accepted_checkpoint"
+    passive = _acquisition(checkpoint, context=destination)
+    assert not monitor.continue_same_battle_at_target(
+        destination,
+        acquisition=passive,
+    )
+
+    wrong_identity = _context(generation=5, identity="b" * 64)
+    forced = replace(
+        _acquisition(checkpoint, context=wrong_identity),
+        acquisition_type=PlayerSaveAcquisitionType.FORCED_SERIALIZATION,
+    )
+    assert not monitor.continue_same_battle_at_target(
+        wrong_identity,
+        acquisition=forced,
+    )
+    assert monitor.latest_summary(source) is not None
+    assert monitor.latest_summary(destination) is None
