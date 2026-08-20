@@ -66,6 +66,7 @@ from core.profile_progression import (
 from core.runtime_save import runtime_with_perk_id_overrides
 from core.runtime_save import (
     active_tally_contract_fingerprints,
+    cell_balance_contract_fingerprints,
     survival_activation_contract_fingerprints,
 )
 
@@ -207,7 +208,7 @@ def test_v1101_raw_field_manifest_is_complete_compatible_extension():
         "enemiesKilledThisWave",
         "enemiesSpawnedThisWave",
     } <= set(manifest["dispositions"]["unknown"])
-    assert len(manifest["dispositions"]["runtime_observation"]) == 35
+    assert len(manifest["dispositions"]["runtime_observation"]) == 36
     _validate_runtime_save_extensions(
         VERSION_1101_MAPPING,
         source="v1101 test mapping",
@@ -218,6 +219,9 @@ def test_v1101_raw_field_manifest_is_complete_compatible_extension():
     assert VERSION_1101_MAPPING["runtime_save_extensions"][
         "survival_ability_activations"
     ]["audit_id"] == "V1101-RUNTIME-018"
+    assert VERSION_1101_MAPPING["runtime_save_extensions"][
+        "cell_balance"
+    ]["audit_id"] == "V1101-RUNTIME-021"
 
     unchanged_semantic_sections = {
         "auto_pick_order",
@@ -587,6 +591,7 @@ def _decoded_save_v1101() -> dict:
             "enemiesSpawnedThisWave": 19,
             "blackHoleCoinsThisRound": 410_000_000_000_000_000.0,
             "cashEarnedThisRound": 2_900_000_000_000.0,
+            "cells": 25_000_000.0,
             "cellsEarnedThisRound": 2_340_000.0,
             "coinsBonusTotalCoinsThisRound": 2_980_000_000_000_000_000.0,
             "coinsBonusUpgradeCoinsThisRound": 450_000_000_000_000_000.0,
@@ -804,6 +809,25 @@ def test_v1101_decode_reuses_compatible_mappings_and_keeps_tournament_ui(
     assert tallies is not None
     assert tallies.status == "observed"
     assert tallies.audit_id == "V1101-RUNTIME-017"
+    balance = snapshot.runtime_save.cell_balance
+    assert balance is not None
+    assert balance.status == "observed"
+    assert balance.value_decimal == "25000000"
+    assert balance.source_fields == ("cells",)
+    assert balance.evidence_level == "structural_observation"
+    assert balance.forward_policy == "exact_version_only"
+    balance_capability = snapshot.capability(
+        "thetower.player_save.cell_balance.v1"
+    )
+    assert balance_capability is not None
+    assert balance_capability.status == "observed"
+    assert balance_capability.authority_id == "V1101-RUNTIME-021"
+    assert balance_capability.semantic_fingerprint == (
+        balance.semantic_fingerprint
+    )
+    assert balance_capability.binding_fingerprint == (
+        balance.binding_fingerprint
+    )
     economy = tallies.as_dict()["components"]["economy"]
     assert economy["metrics"]["coins_earned"]["value_decimal"] == (
         "7240000000000000000"
@@ -875,6 +899,32 @@ def test_v1101_active_tally_failure_isolated_to_one_leaf(monkeypatch):
     assert payload["components"]["coin_sources"]["status"] == "observed"
     assert payload["components"]["progress"]["status"] == "observed"
     assert "changed-shape" not in json.dumps(payload)
+
+
+def test_v1101_cell_balance_failure_isolated_from_other_runtime_claims(
+    monkeypatch,
+):
+    decoded = _decoded_save_v1101()
+    decoded["cells"] = "changed-shape"
+
+    snapshot = _snapshot_v1101(monkeypatch, decoded)
+    runtime = snapshot.runtime_save
+
+    assert runtime is not None
+    assert runtime.cell_balance is None
+    assert runtime.cell_balance_status == "unavailable"
+    assert runtime.cell_balance_reason == (
+        "active_tally_number_invalid:cell_balance"
+    )
+    assert runtime.active_tallies is not None
+    assert runtime.active_tallies.status == "observed"
+    assert runtime.battle_history_tail.structural_status == "observed"
+    capability = snapshot.capability(
+        "thetower.player_save.cell_balance.v1"
+    )
+    assert capability is not None
+    assert capability.status == "unavailable"
+    assert "changed-shape" not in json.dumps(snapshot.as_dict())
 
 
 @pytest.mark.parametrize(
@@ -1076,6 +1126,29 @@ def test_active_tally_contract_separates_semantics_from_raw_binding():
     assert changed_scope_binding == binding
 
 
+def test_cell_balance_contract_separates_semantics_from_raw_binding():
+    original = copy.deepcopy(
+        VERSION_1101_MAPPING["runtime_save_extensions"]["cell_balance"]
+    )
+    semantic, binding = cell_balance_contract_fingerprints(original)
+
+    rebound = copy.deepcopy(original)
+    rebound["field"]["source"] = "renamedCells"
+    rebound_semantic, rebound_binding = cell_balance_contract_fingerprints(
+        rebound
+    )
+    changed_semantics = copy.deepcopy(original)
+    changed_semantics["scope"]["semantics"]["resource"] = "changed_resource"
+    changed_semantic, changed_binding = cell_balance_contract_fingerprints(
+        changed_semantics
+    )
+
+    assert rebound_semantic == semantic
+    assert rebound_binding != binding
+    assert changed_semantic != semantic
+    assert changed_binding == binding
+
+
 @pytest.mark.parametrize(
     ("field", "value", "expected"),
     (
@@ -1183,6 +1256,16 @@ def test_runtime_extension_rejects_duplicate_terminal_sources():
         _validate_runtime_save_extensions(mapping, source="test mapping")
 
 
+def test_runtime_extension_rejects_cell_balance_action_authority():
+    mapping = copy.deepcopy(VERSION_1101_MAPPING)
+    mapping["runtime_save_extensions"]["cell_balance"]["scope"][
+        "semantics"
+    ]["action_authority"] = True
+
+    with pytest.raises(PlayerSaveError, match="cell-balance runtime authority"):
+        _validate_runtime_save_extensions(mapping, source="test mapping")
+
+
 def test_v1101_compatible_snapshot_projects_setup_capture_allowlist(monkeypatch):
     decoded = _decoded_save_v1101()
     decoded["upgradeWorkshopLevel"][4] = 79
@@ -1286,6 +1369,10 @@ def test_unknown_additive_version_uses_latest_compatible_mapping(monkeypatch):
     assert snapshot.runtime_save.survival_ability_activations_reason == (
         "survival_activation_mapping_unavailable"
     )
+    assert snapshot.runtime_save.cell_balance is None
+    assert snapshot.runtime_save.cell_balance_reason == (
+        "cell_balance_mapping_unavailable"
+    )
     capability = snapshot.capability(
         "thetower.player_save.active_run_tallies.v1"
     )
@@ -1301,6 +1388,9 @@ def test_unknown_additive_version_uses_latest_compatible_mapping(monkeypatch):
     )
     assert snapshot.capability(
         "thetower.player_save.survival_ability_activations.v1"
+    ) is None
+    assert snapshot.capability(
+        "thetower.player_save.cell_balance.v1"
     ) is None
     assert snapshot.profile_progression["status"] == "unavailable"
     assert snapshot.profile_progression["reason"] == (
@@ -1528,7 +1618,7 @@ def test_semantic_forward_empty_history_retains_explicit_terminal_baseline(
 def test_exact_version_decode_builds_redacted_candidate_snapshot(monkeypatch):
     snapshot = _snapshot(monkeypatch)
 
-    assert snapshot.as_dict()["schema_version"] == 7
+    assert snapshot.as_dict()["schema_version"] == 8
     assert snapshot.mapping_id == "data-9-game-1073"
     assert snapshot.mapping_maturity == "candidate"
     assert snapshot.validated_checks == (
@@ -1553,6 +1643,12 @@ def test_exact_version_decode_builds_redacted_candidate_snapshot(monkeypatch):
         "tournament_conditions",
     )
     assert snapshot.shape_valid
+    assert snapshot.runtime_save is not None
+    assert snapshot.runtime_save.cell_balance is None
+    assert snapshot.runtime_save.cell_balance_reason == (
+        "cell_balance_mapping_unavailable"
+    )
+    assert snapshot.capability("thetower.player_save.cell_balance.v1") is None
     assert snapshot.source_name == "playerInfo.dat"
     assert snapshot.profile_summary["cards"] == {
         "base_slots": 22,
@@ -1771,7 +1867,7 @@ def test_runtime_capture_and_history_projection_are_privacy_safe(monkeypatch):
     assert runtime is not None
 
     payload = runtime.as_dict()
-    assert payload["schema_version"] == 4
+    assert payload["schema_version"] == 5
     assert payload["capture"] == {
         "captured_at": CAPTURED_AT.isoformat(),
         "source_name": "playerInfo.dat",
@@ -1796,6 +1892,15 @@ def test_runtime_capture_and_history_projection_are_privacy_safe(monkeypatch):
     assert counter_vector["evidence"]["tier_count"] == 40
     assert len(counter_vector["evidence"]["fingerprint"]) == 64
     assert "rounds_started_this_tier" not in json.dumps(counter_vector)
+    assert payload["cell_balance"] == {
+        "schema_version": 1,
+        "status": "unavailable",
+        "reason": "cell_balance_mapping_unavailable",
+        "value_decimal": None,
+        "unit": "cells",
+        "temporal_scope": "point_in_time_account_balance",
+        "ui_action_authority": False,
+    }
 
     rows = {
         (section["key"], row["key"]): row

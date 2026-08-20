@@ -213,6 +213,30 @@ class AdbPortTests(unittest.TestCase):
                 parse_args([])
 
 
+class CellBufferTests(unittest.TestCase):
+    def test_cell_buffer_is_optional(self):
+        with patch.dict("os.environ", {}, clear=True):
+            config = config_from_args(parse_args([]))
+        self.assertIsNone(config.cell_buffer_floor)
+
+    def test_cell_buffer_uses_managed_environment_default(self):
+        with patch.dict("os.environ", {"THETOWER_CELL_BUFFER": "25000000"}):
+            config = config_from_args(parse_args([]))
+        self.assertEqual(config.cell_buffer_floor, 25_000_000)
+
+    def test_cell_buffer_accepts_cli_override(self):
+        with patch.dict("os.environ", {"THETOWER_CELL_BUFFER": "25000000"}):
+            config = config_from_args(
+                parse_args(["--cell-buffer", "30000000"])
+            )
+        self.assertEqual(config.cell_buffer_floor, 30_000_000)
+
+    def test_cell_buffer_rejects_invalid_or_negative_values(self):
+        for value in ("invalid", "-1", "1.5"):
+            with self.subTest(value=value), self.assertRaises(SystemExit):
+                parse_args(["--cell-buffer", value])
+
+
 class DefaultStrategyTests(unittest.TestCase):
     def test_farm_is_the_default_strategy(self):
         config = config_from_args(parse_args([]))

@@ -23,6 +23,7 @@ STRATEGY_ENVIRONMENT_VARIABLE = "THETOWER_STRATEGY"
 DEFAULT_STARTUP_GATE_POLICY = "auto_validate"
 STARTUP_GATE_POLICY_ENVIRONMENT_VARIABLE = "THETOWER_STARTUP_GATES"
 PLAYER_SAVE_AUDIT_ENVIRONMENT_VARIABLE = "THETOWER_PLAYER_SAVE_AUDIT"
+CELL_BUFFER_ENVIRONMENT_VARIABLE = "THETOWER_CELL_BUFFER"
 STARTUP_GATE_POLICIES = (
     "operator",
     "auto",
@@ -60,6 +61,7 @@ class AppConfig:
     adb_connection_owner: str
     startup_gate_policy: str
     player_save_audit_enabled: bool
+    cell_buffer_floor: Optional[int]
 
 
 def _adb_port(value: str) -> int:
@@ -83,6 +85,20 @@ def _adb_connection_owner(value: str) -> str:
             + ", ".join(ADB_CONNECTION_OWNERS)
         )
     return owner
+
+
+def _cell_buffer(value: str) -> int:
+    """Parse the optional nonnegative Cell reserve floor."""
+
+    try:
+        floor = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            "Cell buffer must be a whole number"
+        ) from exc
+    if floor < 0:
+        raise argparse.ArgumentTypeError("Cell buffer cannot be negative")
+    return floor
 
 
 def _player_save_audit_environment_enabled(value: Optional[str]) -> bool:
@@ -146,6 +162,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
                         help="Minutes of continuous visibility before auto 'Return to Game' tap (default: 15)")
     parser.add_argument("--control-file", default="logs/automation_ctl.json",
                         help="Path to JSON control file for pause/resume/mode (default: logs/automation_ctl.json)")
+    parser.add_argument(
+        "--cell-buffer",
+        type=_cell_buffer,
+        default=os.getenv(CELL_BUFFER_ENVIRONMENT_VARIABLE),
+        metavar="CELLS",
+        help=(
+            "Optional Cell reserve floor used for status and warnings only; "
+            "it never changes Lab Speedups "
+            f"(environment: ${CELL_BUFFER_ENVIRONMENT_VARIABLE})"
+        ),
+    )
     parser.add_argument("--fast-game-over", action="store_true",
                         help="Explicitly skip structured More Stats capture on GAME_OVER")
     parser.add_argument("--full-game-over", action="store_true",
@@ -252,6 +279,7 @@ def config_from_args(args: argparse.Namespace) -> AppConfig:
         adb_connection_owner=args.adb_connection_owner,
         startup_gate_policy=args.startup_gates,
         player_save_audit_enabled=bool(args.player_save_audit),
+        cell_buffer_floor=args.cell_buffer,
     )
 
 
@@ -260,6 +288,7 @@ __all__ = [
     "ADB_CONNECTION_OWNERS",
     "ADB_PORT_ENVIRONMENT_VARIABLE",
     "AppConfig",
+    "CELL_BUFFER_ENVIRONMENT_VARIABLE",
     "DEFAULT_ADB_CONNECTION_OWNER",
     "DEFAULT_ADB_PORT",
     "DEFAULT_STRATEGY",

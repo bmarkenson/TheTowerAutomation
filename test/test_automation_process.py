@@ -758,6 +758,7 @@ def test_checked_in_systemd_unit_loads_managed_automation_environment():
     ).read_text(encoding="utf-8")
 
     assert "EnvironmentFile=-%h/.config/thetower/automation-adb.env" in unit
+    assert "EnvironmentFile=-%h/.config/thetower/cell-balance.env" in unit
     assert (
         "EnvironmentFile=-%h/.config/thetower/player-save-audit.env" in unit
     )

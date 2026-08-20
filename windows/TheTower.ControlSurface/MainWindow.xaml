@@ -219,6 +219,7 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
           </Grid.RowDefinitions>
           <Grid.ColumnDefinitions>
             <ColumnDefinition Width="0.75*" />
@@ -323,6 +324,30 @@
                       Margin="2,9,0,0">
             <TextBlock Text="SAVE CHECKPOINT" Foreground="{StaticResource MutedBrush}" FontSize="9" />
             <TextBlock x:Name="MetricCheckpointText" Text="-" FontSize="15" FontWeight="Bold" TextWrapping="Wrap" />
+          </StackPanel>
+          <StackPanel Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="2"
+                      x:Name="CellBalanceMetricPanel"
+                      Visibility="Collapsed"
+                      Margin="2,9,12,0"
+                      ToolTip="Latest structurally observed Elite Cell account balance from an already-owned player-save acquisition.">
+            <TextBlock Text="CELL BALANCE" Foreground="{StaticResource MutedBrush}" FontSize="9" />
+            <TextBlock x:Name="CellBalanceText" Text="-" FontSize="15" FontWeight="Bold" />
+          </StackPanel>
+          <StackPanel Grid.Row="3" Grid.Column="2" Grid.ColumnSpan="2"
+                      x:Name="CellTrendMetricPanel"
+                      Visibility="Collapsed"
+                      Margin="2,9,12,0"
+                      ToolTip="Net balance change between comparable save observations. Earnings and Lab Speedup spending are not separated.">
+            <TextBlock Text="CELL NET TREND" Foreground="{StaticResource MutedBrush}" FontSize="9" />
+            <TextBlock x:Name="CellTrendText" Text="-" FontSize="15" FontWeight="Bold" />
+          </StackPanel>
+          <StackPanel Grid.Row="3" Grid.Column="4" Grid.ColumnSpan="2"
+                      x:Name="CellBufferMetricPanel"
+                      Visibility="Collapsed"
+                      Margin="2,9,0,0"
+                      ToolTip="Optional reserve floor. This release warns only and never changes Lab Speedups.">
+            <TextBlock Text="CELL BUFFER" Foreground="{StaticResource MutedBrush}" FontSize="9" />
+            <TextBlock x:Name="CellBufferText" Text="-" FontSize="15" FontWeight="Bold" TextWrapping="Wrap" />
           </StackPanel>
         </Grid>
       </StackPanel>

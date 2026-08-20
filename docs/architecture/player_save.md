@@ -580,9 +580,9 @@ other selector/type value remain outside runtime authority until a separate
 mapping implementation and review promotes them; no semantics are inferred
 for the other values.
 
-Snapshot schema 7 contains observed identity, manifest diagnostics, legacy
+Snapshot schema 8 contains observed identity, manifest diagnostics, legacy
 mapping provenance, and independently resolved semantic-capability evidence;
-its runtime projection is schema 3. Parser-wide failure is limited to transport,
+its runtime projection is schema 5. Parser-wide failure is limited to transport,
 container/decompression, NRBF, non-object root, or an invalid checked-in
 registry. Missing or malformed mapped leaves produce local statuses instead of
 discarding the document. `saveRevision`, `roundActiveBool`, and `currentWave`
@@ -826,6 +826,13 @@ bound to it unavailable, plus their derived dependents. Array length policy is
 claim-local: a complete-set contract may require an exact length while an
 indexed or prefix contract can survive an unrelated append.
 
+The version-1101 structural manifest inventories 741 names: 13 structural, 40
+automation-gating, 48 profile-observation, 36 runtime-observation, 33 private,
+2 ignored-with-reason, and 502 unknown. `cells` is the only balance promoted
+from private disposition, and only through the exact-version
+`V1101-RUNTIME-021` observation capability. The other currency and resource
+balances remain private.
+
 ### Evidence and promotion standard
 
 A versioned claim progresses through four evidence levels:
@@ -926,6 +933,7 @@ inherited claims continue to cite their originating authority.
 | `V1073-V1101-RANGE-001` effective Attack Range parity | Independently disassembled version-1073 and version-1101 IL2CPP methods, constants, Card table, Module effect definitions, assist efficiency, and display formatter | **Shortcut-ready for both listed versions.** Instruction sequences and binary constants are identical; the mapping mirrors one semantic/binding contract while retaining each structural version's provenance. | The capability's own `supported_game_versions` is exact and does not inherit `allow_forward_game_versions`. Version 1102 or later may retain unrelated structurally compatible checks, but Attack Range and dependent Orb Distance remain unavailable until their mechanics are reviewed. |
 | `V1101-RUNTIME-017` active economy, progress, and coin-source tallies | Declared semantic capability with 29 cumulative leaf bindings; inherited completed-history claims; compact terminal Game Stats for ad coins | **Cross-channel and implemented.** Two same-identity active checkpoints were monotonic, their interval CPH agreed with the contemporaneous UI scale, the Guardian Fetch algebra reconciled, and every mapped terminal counter was nondecreasing at the causally attached natural boundary. Only normalized allowlisted evidence is retained above. | Version 1101 is the authority origin and binding provider for `thetower.player_save.active_run_tallies.v1`, not a literal consumer gate. Exact 1073 remains unavailable; unknown additive forward revisions inherit only this declared capability. Unknown fields remain unpublished. Each leaf and derived dependency fails or conflicts independently. `ActiveRunMetricMonitor` only consumes forced, natural, periodic-passive, or Perk-requested bundles; it retains process/target/round binding and reconciles each eligible terminal claim. Log scope is presentation metadata. No metric grants input, lifecycle, navigation, or Strategy authority. |
 | `V1101-RUNTIME-018` survival-ability activation timing | `demonModesUsedThisRound`, `nukesUsedThisRound`, `secondWindsUsedThisRound`; matching `*WavesUntilRefresh`; `researchLevel[146]`, `[149]`, and `[145]` recharge curves | **Live causal formula contract implemented.** Bounded in-memory reads confirmed the research bindings, inactive-timer fail-closed behavior, natural Second Wind and Demon Mode count transitions, and four active countdown candidates without retaining a raw save. The repeated Second Wind candidates differed by one wave, so the contract publishes their bounded save-derived range rather than claiming false exactness. Synthetic coverage proves all three recharge bindings and malformed-ability isolation. | `thetower.player_save.survival_ability_activations.v1` is independently fingerprinted, exact-version-only, and consumed only from the existing shared acquisition path. A positive count plus an active refresh target derives the latest sequence's candidate; repeated checkpoints accumulate its minimum/maximum. An inactive or outside-window timer publishes no wave. The tracker merges this evidence with its visual event or adds one save-only event, while report Markdown and Battle History label precision explicitly. It grants no input, navigation, lifecycle, or Strategy authority. |
+| `V1101-RUNTIME-021` Elite Cell account balance | `cells` as one finite nonnegative numeric point-in-time total | **Structural and implemented for observation only.** The version-1101 manifest publishes this one field through `thetower.player_save.cell_balance.v1`, separately fingerprinted from active-round Cells earned. Malformed values fail only this component, and synthetic coverage proves privacy-safe normalization and exact-version isolation. | Exact version 1101 may feed the bounded Cell Balance tracker from an already-owned typed acquisition. Exact 1073 and unknown forward versions remain unavailable. Differences are net account movement—generation and Lab Speedup spending are not separated—and source write lag remains acquisition-owned. This claim cannot suppress UI, change a Lab Speedup, or grant input, navigation, lifecycle, or Strategy authority. |
 
 The complete currently eligible configuration set is adopted atomically by
 `V1073-RUNTIME-001`/`002`; this is not a promotion of unrelated profile or
@@ -1426,8 +1434,9 @@ authentication or hostile-user security control. It deliberately omits
 contains only authority-allowlisted
 round, Perk, and completed-battle evidence; its profile-progression projection
 contains only the exact-version structural allowlist described above.
-Non-report history fields, balances, purchase histories, Module GUIDs, and
-arbitrary inventory records remain unpublished. It includes SHA-256 source and
+Non-report history fields, purchase histories, Module GUIDs, arbitrary
+inventory records, and every balance except the exact-version allowlisted
+normalized Elite Cell total remain unpublished. It includes SHA-256 source and
 canonical component fingerprints so observations can be correlated without
 retaining the save. Completed battle records retain the normalized allowlist
 and exact deltas, not the raw NRBF root. The operator-owned

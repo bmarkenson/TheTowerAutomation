@@ -21,6 +21,8 @@
              Link="ActiveRunMetricPresenter.cs" />
     <Compile Include="..\TheTower.ControlSurface\BattleScreenMetricPresenter.cs"
              Link="BattleScreenMetricPresenter.cs" />
+    <Compile Include="..\TheTower.ControlSurface\CellBalancePresenter.cs"
+             Link="CellBalancePresenter.cs" />
     <Compile Include="..\TheTower.ControlSurface\BlueStacksInstanceController.cs"
              Link="BlueStacksInstanceController.cs" />
     <Compile Include="..\TheTower.ControlSurface\BlueStacksMaintenanceCoordinator.cs"

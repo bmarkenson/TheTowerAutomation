@@ -2693,6 +2693,7 @@ public partial class MainWindow : Window
         {
             ClearBattleScreenMetrics();
             ClearActiveRunMetrics();
+            ClearCellBalance();
             SetHttpConnectionStatus(
                 serviceState.ActiveState == "failed"
                     ? "Unavailable — service failed"
@@ -2739,6 +2740,7 @@ public partial class MainWindow : Window
         {
             ClearBattleScreenMetrics();
             ClearActiveRunMetrics();
+            ClearCellBalance();
             if (!force)
             {
                 SetHttpConnectionStatus(
@@ -2750,6 +2752,7 @@ public partial class MainWindow : Window
         {
             ClearBattleScreenMetrics();
             ClearActiveRunMetrics();
+            ClearCellBalance();
             var serviceStopped = _controlSurfaceServiceState is
                 { IsActive: false, ActiveState: "inactive" };
             SetHttpConnectionStatus(
@@ -3347,6 +3350,9 @@ public partial class MainWindow : Window
                 status.ControlModel?.ActiveRunMetrics,
                 observedRoundIdentity,
                 processActive && sameBattleObservationAvailable));
+        RenderCellBalance(
+            CellBalancePresenter.Present(
+                status.ControlModel?.CellBalance));
         var runElapsed = FormatRunElapsed(
             status.CurrentRun,
             status.ServerTime);
@@ -5378,6 +5384,36 @@ public partial class MainWindow : Window
                 null,
                 observedRoundIdentity: null,
                 activeBattleAvailable: false));
+
+    private void RenderCellBalance(CellBalancePresentation presentation)
+    {
+        CellBalanceText.Text = presentation.Total ?? "";
+        CellBalanceMetricPanel.ToolTip = presentation.Detail;
+        CellBalanceMetricPanel.Visibility = presentation.Total is null
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+
+        CellTrendText.Text = presentation.Trend ?? "";
+        CellTrendText.Foreground = presentation.TrendFalling
+            ? new SolidColorBrush(Color.FromRgb(255, 113, 135))
+            : Foreground;
+        CellTrendMetricPanel.ToolTip = presentation.Detail;
+        CellTrendMetricPanel.Visibility = presentation.Trend is null
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+
+        CellBufferText.Text = presentation.Buffer ?? "";
+        CellBufferText.Foreground = presentation.BufferWarning
+            ? new SolidColorBrush(Color.FromRgb(255, 113, 135))
+            : Foreground;
+        CellBufferMetricPanel.ToolTip = presentation.Detail;
+        CellBufferMetricPanel.Visibility = presentation.Buffer is null
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+    }
+
+    private void ClearCellBalance() =>
+        RenderCellBalance(CellBalancePresenter.Present(null));
 
     private static string FormatPercent(double? value) =>
         value is null

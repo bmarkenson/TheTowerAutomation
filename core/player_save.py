@@ -34,6 +34,7 @@ from core.runtime_save import (
     NormalizedRuntimeSave,
     RuntimeSaveNormalizationError,
     active_tally_contract_fingerprints,
+    cell_balance_contract_fingerprints,
     normalize_runtime_save,
     survival_activation_contract_fingerprints,
 )
@@ -84,7 +85,7 @@ PLAYER_SAVE_DEVICE_PATH = (
 )
 MAX_PLAYER_SAVE_BYTES = 512 * 1024
 MAX_DECOMPRESSED_SAVE_BYTES = 4 * 1024 * 1024
-SNAPSHOT_SCHEMA_VERSION = 7
+SNAPSHOT_SCHEMA_VERSION = 8
 RAW_FIELD_MANIFEST_SCHEMA_VERSION = 1
 REVISION_COMPATIBILITY_SCHEMA_VERSION = 1
 RUNTIME_SAVE_EXTENSION_SCHEMA_VERSION = 1
@@ -687,6 +688,38 @@ def _build_capability_evidence(
                 resolution=mapping_resolution.resolution,
                 forward_policy=str(
                     tally_spec.get("forward_policy") or "none"
+                ),
+            )
+
+    balance_spec = runtime_spec.get("cell_balance")
+    if isinstance(balance_spec, Mapping):
+        capability_id = str(balance_spec.get("capability_id") or "").strip()
+        if capability_id:
+            semantic_fingerprint, binding_fingerprint = (
+                cell_balance_contract_fingerprints(balance_spec)
+            )
+            balance = runtime_save.cell_balance if runtime_save else None
+            status = getattr(balance, "status", "unavailable")
+            reason = getattr(
+                balance,
+                "reason",
+                (
+                    runtime_save.cell_balance_reason
+                    if runtime_save is not None
+                    else "runtime_projection_unavailable"
+                ),
+            )
+            evidence[capability_id] = PlayerSaveCapabilityEvidence(
+                capability_id=capability_id,
+                status=str(status),
+                reason=str(reason),
+                semantic_fingerprint=semantic_fingerprint,
+                binding_fingerprint=binding_fingerprint,
+                authority_id=str(balance_spec.get("audit_id") or ""),
+                provider_mapping_id=provider_mapping_id,
+                resolution=mapping_resolution.resolution,
+                forward_policy=str(
+                    balance_spec.get("forward_policy") or "none"
                 ),
             )
 
@@ -2476,6 +2509,7 @@ def _validate_runtime_save_extensions(
         return
     allowed_extensions = {
         "active_tallies",
+        "cell_balance",
         "survival_ability_activations",
     }
     if (
@@ -2650,19 +2684,95 @@ def _validate_runtime_save_extensions(
                     f"is invalid in {source}"
                 )
     active_tally_contract_fingerprints(active)
+    cell_balance_sources = _validate_cell_balance_extension(
+        extensions.get("cell_balance"),
+        allowlisted=allowlisted,
+        source=source,
+    )
     survival_sources = _validate_survival_activation_extension(
         extensions.get("survival_ability_activations"),
         dispositions=dispositions,
         allowlisted=allowlisted,
         source=source,
     )
-    if used_sources & survival_sources or (
-        used_sources | survival_sources
-    ) != allowlisted:
+    if (
+        used_sources & survival_sources
+        or used_sources & cell_balance_sources
+        or survival_sources & cell_balance_sources
+        or (used_sources | survival_sources | cell_balance_sources)
+        != allowlisted
+    ):
         raise PlayerSaveError(
             "runtime-observation fields must be published exactly once by "
             f"one runtime extension in {source}"
         )
+
+
+def _validate_cell_balance_extension(
+    balance: Any,
+    *,
+    allowlisted: set[str],
+    source: Path | str,
+) -> set[str]:
+    """Validate the observation-only exact-version Cell balance contract."""
+
+    expected_keys = {
+        "schema_version",
+        "capability_id",
+        "forward_policy",
+        "audit_id",
+        "evidence_level",
+        "scope",
+        "field",
+    }
+    if not isinstance(balance, Mapping) or set(balance) != expected_keys:
+        raise PlayerSaveError(
+            f"cell-balance runtime extension is malformed in {source}"
+        )
+    if (
+        balance.get("schema_version") != RUNTIME_SAVE_EXTENSION_SCHEMA_VERSION
+        or balance.get("capability_id")
+        != "thetower.player_save.cell_balance.v1"
+        or balance.get("forward_policy") != "exact_version_only"
+        or not str(balance.get("audit_id") or "").strip()
+        or balance.get("evidence_level") != "structural_observation"
+        or balance.get("scope")
+        != {
+            "semantics": {
+                "resource": "elite_cells",
+                "temporal_scope": "point_in_time_account_balance",
+                "change_semantics": (
+                    "net_earn_and_spend_between_comparable_observations"
+                ),
+                "freshness": "acquisition_type_owned",
+                "action_authority": False,
+            },
+            "binding": {"balance": "cells"},
+        }
+    ):
+        raise PlayerSaveError(
+            f"cell-balance runtime authority is invalid in {source}"
+        )
+    field_spec = balance.get("field")
+    if not isinstance(field_spec, Mapping) or set(field_spec) != {
+        "source",
+        "kind",
+        "unit",
+    }:
+        raise PlayerSaveError(
+            f"cell-balance field mapping is malformed in {source}"
+        )
+    source_field = str(field_spec.get("source") or "")
+    if (
+        source_field not in allowlisted
+        or field_spec.get("kind") != "nonnegative_number"
+        or field_spec.get("unit") != "cells"
+    ):
+        raise PlayerSaveError(
+            f"cell-balance field authority is invalid in {source}"
+        )
+    cell_balance_contract_fingerprints(balance)
+    return {source_field}
 
 
 def _validate_survival_activation_extension(

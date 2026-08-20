@@ -124,6 +124,7 @@ from core.player_save_acquisition import (
 from core.player_save_audit import PlayerSaveAuditCollector
 from core.player_save_passive_scheduler import PlayerSavePassiveScheduler
 from core.active_run_metric_monitor import ActiveRunMetricMonitor
+from core.cell_balance_tracker import CellBalanceTracker
 from core.perk_save_monitor import PerkSaveMonitor
 from core.player_save_observation import PlayerSaveObservationContext
 from core.player_save_preflight import (
@@ -451,6 +452,12 @@ class App:
         self._perk_save_monitor_call_lock = threading.RLock()
         self._perk_save_monitor = PerkSaveMonitor()
         self._active_run_metric_monitor = ActiveRunMetricMonitor()
+        self._cell_balance_tracker = CellBalanceTracker(
+            Path(config.control_file).with_name("cell_balance.sqlite3"),
+            buffer_floor=config.cell_buffer_floor,
+        )
+        self._cell_balance_buffer_warning_active = False
+        self._cell_balance_storage_warning_logged = False
         self._player_save_preflight_session_id = ""
         self._player_save_preflight_result = None
         self._player_save_preflight_activity_scope_id = None
@@ -1889,6 +1896,8 @@ class App:
     ) -> None:
         """Deliver one immutable parsed bundle to every eligible consumer."""
 
+        self._observe_cell_balance_bundle(acquisition)
+
         if context is not None:
             store = getattr(self, "_battle_identity_store", None)
             record_progress = getattr(
@@ -2014,6 +2023,37 @@ class App:
             reason_code=reason_code,
         )
 
+    def _observe_cell_balance_bundle(
+        self,
+        acquisition: PlayerSaveAcquisitionBundle,
+    ) -> None:
+        """Consume one shared save without affecting any other projector."""
+
+        balance_tracker = getattr(self, "_cell_balance_tracker", None)
+        if balance_tracker is None:
+            return
+        try:
+            disposition = balance_tracker.observe_bundle(acquisition)
+            if disposition == "accepted_observation":
+                self._log_cell_balance_summary(balance_tracker.status())
+            elif disposition == "rejected_storage_unavailable" and not getattr(
+                self,
+                "_cell_balance_storage_warning_logged",
+                False,
+            ):
+                self._cell_balance_storage_warning_logged = True
+                log(
+                    "[CELL_BALANCE] Balance history could not be persisted; "
+                    "save acquisition and other consumers remain available",
+                    "WARN",
+                )
+        except Exception:
+            log(
+                "[CELL_BALANCE] One shared observation was rejected; other "
+                "save consumers are unaffected",
+                "DEBUG",
+            )
+
     def _observe_shared_acquisition_for_audit(
         self,
         acquisition: PlayerSaveAcquisitionBundle,
@@ -2082,6 +2122,47 @@ class App:
             f"interval_cph={interval_cph or 'unavailable'}",
             "INFO",
         )
+
+    def _log_cell_balance_summary(self, status: Mapping[str, Any]) -> None:
+        """Log balance movement and warn once on a configured floor crossing."""
+
+        if status.get("status") != "observed":
+            return
+        trend = status.get("trend")
+        buffer = status.get("buffer")
+        trend = trend if isinstance(trend, Mapping) else {}
+        buffer = buffer if isinstance(buffer, Mapping) else {}
+        buffer_status = str(buffer.get("status") or "not_configured")
+        log(
+            "[CELL_BALANCE] "
+            f"total={status.get('balance_decimal')} "
+            f"trend={trend.get('direction') or 'unknown'} "
+            f"net_change={trend.get('change_decimal') or 'unavailable'} "
+            f"basis={trend.get('basis') or 'insufficient_history'} "
+            f"buffer={buffer_status}",
+            "INFO",
+        )
+        warning_active = bool(
+            getattr(self, "_cell_balance_buffer_warning_active", False)
+        )
+        if buffer_status == "below" and not warning_active:
+            self._cell_balance_buffer_warning_active = True
+            log(
+                "[CELL_BALANCE] Cell total is below the configured reserve: "
+                f"total={status.get('balance_decimal')} "
+                f"floor={buffer.get('floor_decimal')} "
+                f"headroom={buffer.get('headroom_decimal')}; automatic Lab "
+                "Speedup reduction is not enabled",
+                "WARN",
+            )
+        elif buffer_status in {"above", "at"} and warning_active:
+            self._cell_balance_buffer_warning_active = False
+            log(
+                "[CELL_BALANCE] Cell total recovered to the configured "
+                f"reserve: total={status.get('balance_decimal')} "
+                f"floor={buffer.get('floor_decimal')}",
+                "INFO",
+            )
 
     def _retain_perk_timeline_save_checkpoint(
         self,
@@ -3460,6 +3541,7 @@ class App:
                     self._active_run_performance_evidence(current_strategy)
                 ),
                 "active_run_metrics": self._active_run_metric_status(),
+                "cell_balance": self._cell_balance_status(),
                 "battle_lifecycle": {
                     "awaiting_initial_intent": bool(
                         awaiting_intent()
@@ -3731,6 +3813,18 @@ class App:
             }
         except (TypeError, ValueError):
             return None
+
+    def _cell_balance_status(self) -> Optional[dict[str, Any]]:
+        """Publish the durable observation-only Cell total and net trend."""
+
+        tracker = getattr(self, "_cell_balance_tracker", None)
+        if tracker is None:
+            return None
+        try:
+            status = tracker.status()
+        except Exception:
+            return None
+        return status if isinstance(status, Mapping) else None
 
     def _record_control_observation(
         self,
@@ -12178,6 +12272,9 @@ class App:
             initial_frame=screenshot,
         )
         result = self._bind_forced_home_inactive_identity(result)
+        acquisition = getattr(result, "acquisition", None)
+        if isinstance(acquisition, PlayerSaveAcquisitionBundle):
+            self._observe_cell_balance_bundle(acquisition)
         if (
             getattr(result, "ready", False)
             and getattr(

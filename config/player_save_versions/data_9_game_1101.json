@@ -151,6 +151,7 @@
       "runtime_observation": [
         "blackHoleCoinsThisRound",
         "cashEarnedThisRound",
+        "cells",
         "cellsEarnedThisRound",
         "coinsBonusTotalCoinsThisRound",
         "coinsBonusUpgradeCoinsThisRound",
@@ -189,7 +190,6 @@
         "bits",
         "bucketID",
         "cash",
-        "cells",
         "claimedPurchases",
         "claimedWebstoreGifts",
         "coins",
@@ -2178,6 +2178,30 @@
           },
           "derived": {}
         }
+      }
+    },
+    "cell_balance": {
+      "schema_version": 1,
+      "capability_id": "thetower.player_save.cell_balance.v1",
+      "forward_policy": "exact_version_only",
+      "audit_id": "V1101-RUNTIME-021",
+      "evidence_level": "structural_observation",
+      "scope": {
+        "semantics": {
+          "resource": "elite_cells",
+          "temporal_scope": "point_in_time_account_balance",
+          "change_semantics": "net_earn_and_spend_between_comparable_observations",
+          "freshness": "acquisition_type_owned",
+          "action_authority": false
+        },
+        "binding": {
+          "balance": "cells"
+        }
+      },
+      "field": {
+        "source": "cells",
+        "kind": "nonnegative_number",
+        "unit": "cells"
       }
     },
     "survival_ability_activations": {

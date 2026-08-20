@@ -9,7 +9,7 @@ from tools import import_player_save
 
 class _Snapshot:
     def as_dict(self):
-        return {"schema_version": 7, "mapping": {"supported": True}}
+        return {"schema_version": 8, "mapping": {"supported": True}}
 
 
 def test_local_import_uses_global_parser_file_api(monkeypatch, tmp_path, capsys):
@@ -26,7 +26,7 @@ def test_local_import_uses_global_parser_file_api(monkeypatch, tmp_path, capsys)
 
     assert import_player_save.main(["--file", str(source), "--compact"]) == 0
     assert calls == [source]
-    assert json.loads(capsys.readouterr().out)["snapshot"]["schema_version"] == 7
+    assert json.loads(capsys.readouterr().out)["snapshot"]["schema_version"] == 8
 
 
 def test_adb_import_uses_one_acquirer_and_custom_source_name(
@@ -74,7 +74,7 @@ def test_adb_import_uses_one_acquirer_and_custom_source_name(
         }
     ]
     assert acquired == [PlayerSaveAcquisitionType.PASSIVE_STABLE_READ]
-    assert json.loads(capsys.readouterr().out)["snapshot"]["schema_version"] == 7
+    assert json.loads(capsys.readouterr().out)["snapshot"]["schema_version"] == 8
 
 
 def test_adb_import_reports_shared_acquisition_failure(monkeypatch, capsys):

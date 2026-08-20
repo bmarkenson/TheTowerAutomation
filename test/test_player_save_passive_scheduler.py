@@ -413,6 +413,8 @@ def test_app_fans_one_passive_bundle_to_perks_metrics_and_optional_audit():
         "accepted_checkpoint"
     )
     app._active_run_metric_monitor.latest_summary.return_value = None
+    app._cell_balance_tracker = Mock()
+    app._cell_balance_tracker.observe_bundle.return_value = "ignored_duplicate"
     app._battle_activation_tracker = Mock()
     app._player_save_audit_collector = Mock()
 
@@ -430,6 +432,7 @@ def test_app_fans_one_passive_bundle_to_perks_metrics_and_optional_audit():
         acquisition,
         context=context,
     )
+    app._cell_balance_tracker.observe_bundle.assert_called_once_with(acquisition)
     app._battle_activation_tracker.observe_save_checkpoint.assert_called_once_with(
         acquisition.snapshot.runtime_save,
         expected_identity_fingerprint=(

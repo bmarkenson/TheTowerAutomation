@@ -648,6 +648,7 @@ def test_checkpoint_generated_state_is_isolated_while_host_tools_are_available(
             "PYTHONPATH": "/production/source",
             "THETOWER_ADB_CONNECTION_OWNER": "control-surface",
             "THETOWER_ADB_PORT": "5555",
+            "THETOWER_CELL_BUFFER": "25000000",
             "VIRTUAL_ENV": str(config.production_environment),
         },
         environment=environment,
@@ -660,6 +661,7 @@ def test_checkpoint_generated_state_is_isolated_while_host_tools_are_available(
         "PYTHONPATH",
         "THETOWER_ADB_CONNECTION_OWNER",
         "THETOWER_ADB_PORT",
+        "THETOWER_CELL_BUFFER",
     ):
         assert key not in result
     isolated_values = (

@@ -850,6 +850,9 @@ public sealed class BetterControlModelStatus
     [JsonPropertyName("active_run_metrics")]
     public ActiveRunMetricStatus? ActiveRunMetrics { get; set; }
 
+    [JsonPropertyName("cell_balance")]
+    public CellBalanceStatus? CellBalance { get; set; }
+
     [JsonPropertyName("strategy_scope")]
     public BetterControlStrategyScopeStatus StrategyScope { get; set; } = new();
 
@@ -915,6 +918,129 @@ public sealed class ActiveRunRates
 
     [JsonPropertyName("effective_game_speed")]
     public string? EffectiveGameSpeed { get; set; }
+}
+
+public sealed class CellBalanceStatus
+{
+    [JsonPropertyName("schema_version")]
+    public int SchemaVersion { get; set; }
+
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "unavailable";
+
+    [JsonPropertyName("reason")]
+    public string Reason { get; set; } = "";
+
+    [JsonPropertyName("captured_at")]
+    public string? CapturedAt { get; set; }
+
+    [JsonPropertyName("age_seconds")]
+    public int? AgeSeconds { get; set; }
+
+    [JsonPropertyName("balance_decimal")]
+    public string? BalanceDecimal { get; set; }
+
+    [JsonPropertyName("unit")]
+    public string Unit { get; set; } = "cells";
+
+    [JsonPropertyName("trend")]
+    public CellBalanceTrendStatus? Trend { get; set; }
+
+    [JsonPropertyName("previous")]
+    public CellBalanceChangeStatus? Previous { get; set; }
+
+    [JsonPropertyName("buffer")]
+    public CellBalanceBufferStatus? Buffer { get; set; } = new();
+
+    [JsonPropertyName("history")]
+    public CellBalanceHistoryStatus? History { get; set; } = new();
+
+    [JsonPropertyName("provenance")]
+    public CellBalanceProvenanceStatus? Provenance { get; set; }
+
+    [JsonPropertyName("ui_action_authority")]
+    public bool UiActionAuthority { get; set; }
+}
+
+public sealed class CellBalanceTrendStatus
+{
+    [JsonPropertyName("direction")]
+    public string Direction { get; set; } = "unknown";
+
+    [JsonPropertyName("basis")]
+    public string Basis { get; set; } = "insufficient_history";
+
+    [JsonPropertyName("change_decimal")]
+    public string? ChangeDecimal { get; set; }
+
+    [JsonPropertyName("elapsed_hours_decimal")]
+    public string? ElapsedHoursDecimal { get; set; }
+
+    [JsonPropertyName("net_per_hour_decimal")]
+    public string? NetPerHourDecimal { get; set; }
+}
+
+public sealed class CellBalanceChangeStatus
+{
+    [JsonPropertyName("baseline_captured_at")]
+    public string BaselineCapturedAt { get; set; } = "";
+
+    [JsonPropertyName("change_decimal")]
+    public string ChangeDecimal { get; set; } = "";
+
+    [JsonPropertyName("elapsed_hours_decimal")]
+    public string ElapsedHoursDecimal { get; set; } = "";
+
+    [JsonPropertyName("net_per_hour_decimal")]
+    public string NetPerHourDecimal { get; set; } = "";
+}
+
+public sealed class CellBalanceBufferStatus
+{
+    [JsonPropertyName("status")]
+    public string Status { get; set; } = "unavailable";
+
+    [JsonPropertyName("floor_decimal")]
+    public string? FloorDecimal { get; set; }
+
+    [JsonPropertyName("headroom_decimal")]
+    public string? HeadroomDecimal { get; set; }
+
+    [JsonPropertyName("estimated_hours_to_floor_decimal")]
+    public string? EstimatedHoursToFloorDecimal { get; set; }
+
+    [JsonPropertyName("automatic_reduction_enabled")]
+    public bool AutomaticReductionEnabled { get; set; }
+}
+
+public sealed class CellBalanceHistoryStatus
+{
+    [JsonPropertyName("sample_count")]
+    public int SampleCount { get; set; }
+
+    [JsonPropertyName("comparable_sample_count")]
+    public int ComparableSampleCount { get; set; }
+
+    [JsonPropertyName("retention_days")]
+    public int RetentionDays { get; set; }
+
+    [JsonPropertyName("max_samples")]
+    public int MaxSamples { get; set; }
+}
+
+public sealed class CellBalanceProvenanceStatus
+{
+    [JsonPropertyName("acquisition_type")]
+    public string AcquisitionType { get; set; } = "";
+
+    [JsonPropertyName("mapping_id")]
+    public string MappingId { get; set; } = "";
+
+    [JsonPropertyName("game_version")]
+    public int GameVersion { get; set; }
+
+    [JsonPropertyName("evidence_level")]
+    public string EvidenceLevel { get; set; } = "";
 }
 
 public sealed class ActiveBattleScreenMetricStatus

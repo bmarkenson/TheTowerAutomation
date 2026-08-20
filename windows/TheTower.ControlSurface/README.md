@@ -357,6 +357,17 @@ expected duration, Peak Coins/min, requirement comparison, recovery countdown,
 or Return/Extend/Cancel recovery control is synthesized before a versioned
 status field and guarded runtime directive own it.
 
+A fourth status row is account-scoped rather than battle-scoped. **Cell
+Balance** shows the latest exact-version save total, **Cell Net Trend** shows
+the comparable net change over 24 hours (or over the shorter retained start),
+and **Cell Buffer** shows reserve headroom when Linux was launched with
+`--cell-buffer` or `THETOWER_CELL_BUFFER`. A falling trend and a breached
+reserve use warning color. Tooltips name the capture age, comparison basis,
+sample counts, and structural-only authority. The row can remain visible
+outside an active battle while a fresh runtime status is available. It never
+separates generation from Lab spending, polls a save, or changes a Lab
+Speedup.
+
 The application header keeps four different health signals visible: the fixed
 Linux API service's systemd state, HTTP reachability, the Windows-local API SSH
 tunnel, and the ADB reverse-forward SSH tunnel. The four indicators consume the
@@ -1156,8 +1167,9 @@ supported capabilities. The Windows build carries an expected API version, a
 minimum server revision, and required capabilities. Any mismatch produces a
 prominent full-width **Linux API update required** banner, disables dependent
 actions, and gives disabled Start buttons the same blocker in a tooltip. The
-current Windows build requires revision 50, `bounded_idle_timeout_v1`,
+current Windows build requires revision 51, `bounded_idle_timeout_v1`,
 `active_battle_screen_metrics_v1`, `active_run_metrics_v1`,
+`cell_balance_tracking_v1`,
 `current_battle_perks_v1`, `better_control_model_v2`,
 `runtime_control_acknowledgements_v1`,
 `strategy_aware_attach_v1`,

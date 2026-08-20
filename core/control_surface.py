@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 import fcntl
 import json
 import math
@@ -106,7 +107,7 @@ DEFAULT_STALE_AFTER_SECONDS = 180
 EMULATOR_DEGRADATION_CACHE_SECONDS = 60.0
 # Advance this when a newer Windows client must reload the resident service,
 # and advance that client's MinimumServerRevision in the same change.
-CONTROL_SURFACE_REVISION = 50
+CONTROL_SURFACE_REVISION = 51
 CONTROL_SURFACE_CAPABILITIES = (
     "active_battle_screen_metrics_v1",
     "active_battle_strategy_adoption",
@@ -115,6 +116,7 @@ CONTROL_SURFACE_CAPABILITIES = (
     "better_control_model_v1",
     "better_control_model_v2",
     "bounded_idle_timeout_v1",
+    "cell_balance_tracking_v1",
     "completed_battle_discard",
     "confirmed_local_mapping_status_v2",
     "current_battle_perks_v1",
@@ -5951,6 +5953,7 @@ class ControlSurfaceService:
         runtime_catastrophic_pause_hold: Mapping[str, Any] = {}
         active_battle_screen_metrics: Optional[dict[str, Any]] = None
         active_run_metrics: Optional[dict[str, Any]] = None
+        cell_balance: Optional[dict[str, Any]] = None
         runtime_startup_gate_policy: Optional[str] = None
         runtime_model = runtime_authority.get("control_model")
         if isinstance(runtime_model, Mapping):
@@ -5981,6 +5984,10 @@ class ControlSurfaceService:
             )
             active_run_metrics = _normalize_active_run_metric_status(
                 runtime_model.get("active_run_metrics"),
+                now=now,
+            )
+            cell_balance = _normalize_cell_balance_status(
+                runtime_model.get("cell_balance"),
                 now=now,
             )
         observation_age_seconds: Optional[int] = None
@@ -6843,6 +6850,7 @@ class ControlSurfaceService:
             "observation": observation,
             "active_battle_screen_metrics": active_battle_screen_metrics,
             "active_run_metrics": active_run_metrics,
+            "cell_balance": cell_balance,
             "strategy_scope": {
                 "startup_default": startup_strategy,
                 "active_battle": active_strategy,
@@ -7204,6 +7212,287 @@ def _normalize_active_run_metric_status(
         "checkpoint_wave": checkpoint_wave,
         "whole_run": whole_run,
         "interval": interval,
+    }
+
+
+_CELL_BALANCE_DECIMAL_RE = re.compile(
+    r"-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?"
+)
+
+
+def _normalize_cell_balance_status(
+    value: object,
+    *,
+    now: float,
+) -> Optional[dict[str, Any]]:
+    """Validate durable Cell total/trend data without granting action authority."""
+
+    if (
+        not isinstance(value, Mapping)
+        or value.get("schema_version") != 1
+        or value.get("ui_action_authority") is not False
+    ):
+        return None
+    status = str(value.get("status") or "").strip().lower()
+    if status not in {"observed", "unavailable"}:
+        return None
+
+    def decimal_text(candidate: object, *, signed: bool) -> Optional[str]:
+        text = str(candidate or "").strip()
+        if (
+            not text
+            or len(text) > 96
+            or _CELL_BALANCE_DECIMAL_RE.fullmatch(text) is None
+            or (not signed and text.startswith("-"))
+        ):
+            return None
+        return text
+
+    captured_at = str(value.get("captured_at") or "").strip()
+    captured = _parse_timestamp(captured_at) if captured_at else None
+    balance = decimal_text(value.get("balance_decimal"), signed=False)
+    if status == "observed" and (
+        captured is None
+        or balance is None
+        or value.get("unit") != "cells"
+    ):
+        return None
+    if status == "unavailable":
+        captured_at = ""
+        captured = None
+        balance = None
+
+    def change_summary(candidate: object) -> Optional[dict[str, Any]]:
+        if not isinstance(candidate, Mapping):
+            return None
+        baseline = str(candidate.get("baseline_captured_at") or "").strip()
+        if _parse_timestamp(baseline) is None:
+            return None
+        change = decimal_text(candidate.get("change_decimal"), signed=True)
+        elapsed = decimal_text(
+            candidate.get("elapsed_hours_decimal"),
+            signed=False,
+        )
+        rate = decimal_text(
+            candidate.get("net_per_hour_decimal"),
+            signed=True,
+        )
+        if change is None or elapsed is None or rate is None:
+            return None
+        return {
+            "baseline_captured_at": baseline,
+            "change_decimal": change,
+            "elapsed_hours_decimal": elapsed,
+            "net_per_hour_decimal": rate,
+        }
+
+    trend = None
+    raw_trend = value.get("trend")
+    if status == "observed" and isinstance(raw_trend, Mapping):
+        direction = str(raw_trend.get("direction") or "").strip().lower()
+        basis = str(raw_trend.get("basis") or "").strip().lower()
+        if direction in {"rising", "falling", "flat", "unknown"} and basis in {
+            "24h_window",
+            "since_comparable_start",
+            "insufficient_history",
+        }:
+            change = decimal_text(
+                raw_trend.get("change_decimal"),
+                signed=True,
+            )
+            elapsed = decimal_text(
+                raw_trend.get("elapsed_hours_decimal"),
+                signed=False,
+            )
+            rate = decimal_text(
+                raw_trend.get("net_per_hour_decimal"),
+                signed=True,
+            )
+            if direction == "unknown":
+                if basis != "insufficient_history" or any(
+                    raw_trend.get(field) is not None
+                    for field in (
+                        "change_decimal",
+                        "elapsed_hours_decimal",
+                        "net_per_hour_decimal",
+                    )
+                ):
+                    return None
+                change = elapsed = rate = None
+            else:
+                if basis == "insufficient_history" or None in {
+                    change,
+                    elapsed,
+                    rate,
+                }:
+                    return None
+                change_number = Decimal(change)
+                elapsed_number = Decimal(elapsed)
+                rate_number = Decimal(rate)
+                if (
+                    elapsed_number <= 0
+                    or (
+                        direction == "rising"
+                        and (change_number <= 0 or rate_number <= 0)
+                    )
+                    or (
+                        direction == "falling"
+                        and (change_number >= 0 or rate_number >= 0)
+                    )
+                    or (
+                        direction == "flat"
+                        and (change_number != 0 or rate_number != 0)
+                    )
+                ):
+                    return None
+            trend = {
+                "direction": direction,
+                "basis": basis,
+                "change_decimal": change,
+                "elapsed_hours_decimal": elapsed,
+                "net_per_hour_decimal": rate,
+            }
+    if status == "observed" and trend is None:
+        return None
+
+    raw_buffer = value.get("buffer")
+    if not isinstance(raw_buffer, Mapping):
+        return None
+    buffer_status = str(raw_buffer.get("status") or "").strip().lower()
+    if buffer_status not in {
+        "not_configured",
+        "unavailable",
+        "above",
+        "at",
+        "below",
+    } or raw_buffer.get("automatic_reduction_enabled") is not False:
+        return None
+    floor = decimal_text(raw_buffer.get("floor_decimal"), signed=False)
+    headroom = decimal_text(raw_buffer.get("headroom_decimal"), signed=True)
+    estimate = decimal_text(
+        raw_buffer.get("estimated_hours_to_floor_decimal"),
+        signed=False,
+    )
+    if buffer_status == "not_configured":
+        if any(
+            raw_buffer.get(field) is not None
+            for field in (
+                "floor_decimal",
+                "headroom_decimal",
+                "estimated_hours_to_floor_decimal",
+            )
+        ):
+            return None
+        floor = headroom = estimate = None
+    elif floor is None:
+        return None
+    elif buffer_status == "unavailable":
+        if headroom is not None or estimate is not None:
+            return None
+    elif headroom is None:
+        return None
+    else:
+        headroom_number = Decimal(headroom)
+        if (
+            (buffer_status == "above" and headroom_number <= 0)
+            or (buffer_status == "at" and headroom_number != 0)
+            or (buffer_status == "below" and headroom_number >= 0)
+            or (
+                estimate is not None
+                and (
+                    buffer_status != "above"
+                    or Decimal(estimate) <= 0
+                    or not isinstance(trend, Mapping)
+                    or trend.get("direction") != "falling"
+                )
+            )
+        ):
+            return None
+    buffer = {
+        "status": buffer_status,
+        "floor_decimal": floor,
+        "headroom_decimal": headroom,
+        "estimated_hours_to_floor_decimal": estimate,
+        "automatic_reduction_enabled": False,
+    }
+
+    raw_history = value.get("history")
+    history = None
+    if isinstance(raw_history, Mapping):
+        numeric = {
+            field: raw_history.get(field)
+            for field in (
+                "sample_count",
+                "comparable_sample_count",
+                "retention_days",
+                "max_samples",
+            )
+        }
+        if all(
+            type(item) is int and 0 <= item <= 2_147_483_647
+            for item in numeric.values()
+        ) and (
+            numeric["comparable_sample_count"] <= numeric["sample_count"]
+            and numeric["retention_days"] >= 1
+            and numeric["max_samples"] >= 2
+            and numeric["sample_count"] <= numeric["max_samples"]
+        ):
+            history = numeric
+    if history is None:
+        return None
+
+    provenance = None
+    raw_provenance = value.get("provenance")
+    if isinstance(raw_provenance, Mapping):
+        acquisition_type = str(
+            raw_provenance.get("acquisition_type") or ""
+        ).strip()
+        mapping_id = str(raw_provenance.get("mapping_id") or "").strip()
+        evidence_level = str(
+            raw_provenance.get("evidence_level") or ""
+        ).strip()
+        game_version = raw_provenance.get("game_version")
+        if (
+            acquisition_type
+            in {"forced_serialization", "natural_boundary", "passive_stable_read"}
+            and 0 < len(mapping_id) <= 128
+            and evidence_level == "structural_observation"
+            and type(game_version) is int
+            and 0 <= game_version <= 2_147_483_647
+        ):
+            provenance = {
+                "acquisition_type": acquisition_type,
+                "mapping_id": mapping_id,
+                "game_version": game_version,
+                "evidence_level": evidence_level,
+            }
+    if status == "observed" and provenance is None:
+        return None
+
+    previous = change_summary(value.get("previous"))
+    if value.get("previous") is not None and previous is None:
+        return None
+    return {
+        "schema_version": 1,
+        "status": status,
+        "reason": " ".join(str(value.get("reason") or "").split())[:256],
+        "captured_at": captured_at or None,
+        "age_seconds": (
+            min(
+                2_147_483_647,
+                max(0, int(float(now) - captured.timestamp())),
+            )
+            if captured is not None
+            else None
+        ),
+        "balance_decimal": balance,
+        "unit": "cells",
+        "trend": trend,
+        "previous": previous,
+        "buffer": buffer,
+        "history": history,
+        "provenance": provenance,
+        "ui_action_authority": False,
     }
 
 

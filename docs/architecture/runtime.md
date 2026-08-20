@@ -348,11 +348,11 @@ independent projections:
 
 | Boundary | Acquisition or reuse | Consumers | Failure policy |
 | --- | --- | --- | --- |
-| Home `NEW_BATTLE` before Start/Return | Perform one guarded `forced_serialization`, even when the configuration requirement set is empty; a report handoff may also be consumed from the same boundary. | The inactive runtime projection authorizes clearing retained battle identity; the same bundle supplies configuration and report projections. | An inactive proof is mandatory before Start. A safely restored transient failure is bounded and retryable; restoration, ownership, target, context, or control ambiguity blocks later input. |
-| First stable `RUNNING` after Start, Retry, Enable, or Attach | Perform one guarded `forced_serialization` and compare its exact `ActiveRoundIdentity` with the durable battle-identity record. Home Resume is a two-proof route: force once before the Resume tap to identify its target, then rearm and force again on the first stable `RUNNING` frame before adoption. | `SAME_BATTLE` restores eligible identity-bound state; `LATER_BATTLE` discards old battle-local state and adopts the successor; the bundle also supplies actual-loadout, Perk-prefix, metric, audit, and report projections. | There is no History/UI substitute for battle identity. A safely restored transient failure is bounded and retryable; an active source without identity remains input-blocked. Restoration, owner, target, control, or uncertain-input ambiguity is catastrophic and may Pause. |
-| `GAME_OVER` or `TOURNAMENT_RESULTS` | One lifecycle-bound `natural_boundary` bundle. A process-restart Game Over may propose the retained identity only when the Stop handoff, target generation, and durable full-tier counter baseline agree; the newly acquired inactive save must then prove exact vector equality and non-regressing revision. For a legacy record with no vector, an explicit operator receipt may instead name the retained identity only while exact Pause, fresh Game Over, runtime/PID/target generation, Stop handoff, activity scope, selected Strategy, and its completed preflight fingerprint all agree. | Profile progression, structural terminal transition, semantic completed report, Perk-window closure, optional audit projection, and Tournament conditions. Recovered continuity also unlocks only exact-battle/configuration-bound evidence: an immutable Strategy/report snapshot, a matching completed session-preflight receipt, and the versioned survival-activation checkpoint. The preflight receipt is independently eligible even when an older record lacks the Strategy snapshot; in that case it does not supply run configuration. The operator route reuses a matching independent snapshot or explicitly labels its one-time Strategy backfill. Activation restoration is observed-events-through-checkpoint evidence, not a complete terminal history. | Projection or acquisition failure remains nonblocking and preserves the applicable Game Stats, Perks, or More Stats UI fallback. Missing generic vector or component evidence, any counter change, shape drift, target/runtime change, revision regression, or component identity/configuration mismatch fails closed locally. The operator receipt is audited, report-only, and cannot grant lifecycle input or active-battle adoption. Current-process-only Perk, metric, wave, coin, speed, and transient tracker state remains omitted. |
-| Periodic passive observation | Every 300 seconds, the scheduler attempts one `passive_stable_read` against the current exact process/target/battle binding. The cadence is independent of forced serialization and prompt checkpoints. | Perks, active-run metrics, and optional audit receipts consume any newly serialized positive evidence; unchanged checkpoints are harmless. | An absent binding skips the read. Never treat the timer or a stable pull as proof that the game wrote recently, background the game, claim freshness/absence, or authorize input. |
-| Perk selection or exhaustion checkpoint | The stable Perk top-bar observer may request one coalesced `passive_stable_read` without changing the periodic deadline. It does not force the game to serialize. | The Perk monitor benefits from lower observation latency; active-run metrics and optional audit receipts consume the same read-only bundle without requesting another read. | Drop or record the observation; never background the game, claim freshness/absence, or authorize input. |
+| Home `NEW_BATTLE` before Start/Return | Perform one guarded `forced_serialization`, even when the configuration requirement set is empty; a report handoff may also be consumed from the same boundary. | The inactive runtime projection authorizes clearing retained battle identity; the same bundle supplies configuration, report, and Cell Balance projections. | An inactive proof is mandatory before Start. A safely restored transient failure is bounded and retryable; restoration, ownership, target, context, or control ambiguity blocks later input. |
+| First stable `RUNNING` after Start, Retry, Enable, or Attach | Perform one guarded `forced_serialization` and compare its exact `ActiveRoundIdentity` with the durable battle-identity record. Home Resume is a two-proof route: force once before the Resume tap to identify its target, then rearm and force again on the first stable `RUNNING` frame before adoption. | `SAME_BATTLE` restores eligible identity-bound state; `LATER_BATTLE` discards old battle-local state and adopts the successor; the bundle also supplies actual-loadout, Perk-prefix, metric, Cell Balance, audit, and report projections. | There is no History/UI substitute for battle identity. A safely restored transient failure is bounded and retryable; an active source without identity remains input-blocked. Restoration, owner, target, control, or uncertain-input ambiguity is catastrophic and may Pause. |
+| `GAME_OVER` or `TOURNAMENT_RESULTS` | One lifecycle-bound `natural_boundary` bundle. A process-restart Game Over may propose the retained identity only when the Stop handoff, target generation, and durable full-tier counter baseline agree; the newly acquired inactive save must then prove exact vector equality and non-regressing revision. For a legacy record with no vector, an explicit operator receipt may instead name the retained identity only while exact Pause, fresh Game Over, runtime/PID/target generation, Stop handoff, activity scope, selected Strategy, and its completed preflight fingerprint all agree. | Profile progression, structural terminal transition, semantic completed report, Perk-window closure, Cell Balance, optional audit projection, and Tournament conditions. Recovered continuity also unlocks only exact-battle/configuration-bound evidence: an immutable Strategy/report snapshot, a matching completed session-preflight receipt, and the versioned survival-activation checkpoint. The preflight receipt is independently eligible even when an older record lacks the Strategy snapshot; in that case it does not supply run configuration. The operator route reuses a matching independent snapshot or explicitly labels its one-time Strategy backfill. Activation restoration is observed-events-through-checkpoint evidence, not a complete terminal history. | Projection or acquisition failure remains nonblocking and preserves the applicable Game Stats, Perks, or More Stats UI fallback. Missing generic vector or component evidence, any counter change, shape drift, target/runtime change, revision regression, or component identity/configuration mismatch fails closed locally. The operator receipt is audited, report-only, and cannot grant lifecycle input or active-battle adoption. Current-process-only Perk, metric, wave, coin, speed, and transient tracker state remains omitted. |
+| Periodic passive observation | Every 300 seconds, the scheduler attempts one `passive_stable_read` against the current exact process/target/battle binding. The cadence is independent of forced serialization and prompt checkpoints. | Perks, active-run metrics, Cell Balance, and optional audit receipts consume any newly serialized positive evidence; an unchanged save may still establish a later flat Cell checkpoint. | An absent binding skips the read. Never treat the timer or a stable pull as proof that the game wrote recently, background the game, claim freshness/absence, or authorize input. |
+| Perk selection or exhaustion checkpoint | The stable Perk top-bar observer may request one coalesced `passive_stable_read` without changing the periodic deadline. It does not force the game to serialize. | The Perk monitor benefits from lower observation latency; active-run metrics, Cell Balance, and optional audit receipts consume the same read-only bundle without requesting another read. | Drop or record the observation; never background the game, claim freshness/absence, or authorize input. |
 
 The terminal structural projector validates the newest tail once. A successful
 append or capacity rollover may become a normalized, one-use reporting handoff
@@ -372,9 +372,10 @@ forced Home boundary.
 No consumer reacquires data already represented by the bundle. In particular,
 the Tournament Results handler receives either complete or explicitly
 unavailable conditions from the terminal projection instead of performing a
-second save read. The Perk and active-run metric monitors consume periodic and
-Perk-requested passive, already-forced attachment, and natural terminal
-bundles. The optional audit collector also projects those shared objects and is
+second save read. The Perk and active-run metric monitors plus the global Cell
+Balance tracker consume periodic and Perk-requested passive, already-forced
+attachment, and natural terminal bundles. The optional audit collector also
+projects those shared objects and is
 neither an acquisition service nor an authority source.
 
 `PlayerSaveObservationContext` is the neutral process/target/battle-identity
@@ -389,7 +390,9 @@ consumers of the same object. The parser and acquirer retain no process-global
 "latest snapshot" cache; every coherent boundary owns its explicit bundle.
 The separate control-surface server does not pull or parse saves and no HTTP GET
 triggers ADB work. Existing battle-detail APIs expose only persisted normalized
-`active_run_metrics` after the runtime has established their authority.
+`active_run_metrics` after the runtime has established their authority; the
+global status model separately exposes the runtime's validated Cell Balance
+summary.
 
 `ActivityHistoryReporter` owns only this best-effort handoff publication and
 validation; `utils.logger` owns bounded JSON detachment and atomic log-scope
@@ -407,13 +410,14 @@ checkpoint reads remain opportunistic observations with unknown write lag.
 #### Save-first active-round and terminal evidence
 
 The normalized runtime-save model is a bounded semantic-evidence boundary
-inside the global parser. Runtime projection schema 3 exposes only allowlisted
+inside the global parser. Runtime projection schema 5 exposes only allowlisted
 claims from legacy mappings and resolved semantic capabilities; it never
 publishes the decoded root or an arbitrary `BattleHistoryEntry`. Whole-parse
 failure is limited to unreadable/unstable transport, bounded container or NRBF
 failure, non-object roots, and invalid checked-in registries. `saveRevision`,
-round state, wave, Perks, active tallies, structural History, completed rows,
-and terminal tally facts report independent status. A malformed shared scalar
+round state, wave, Perks, active tallies, Cell Balance, structural History,
+completed rows, and terminal tally facts report independent status. A malformed
+shared scalar
 therefore removes only its transitive dependents. An unknown Perk ID cannot
 publish a partial inventory, while an unknown `killedBy` blocks only cause/full
 report semantics and preserves structural tail-change and unrelated terminal
@@ -540,6 +544,34 @@ coin-source checkpoints likewise record distinct whole-run and interval rates
 for every published source. These realized save rates are separate from OCR
 `coin_rate_samples`: the displayed Coins/min value is never multiplied by 60
 and relabeled as realized CPH.
+
+The global `CellBalanceTracker` is deliberately separate from those
+active-round Cells-earned rates. Exact version 1101 may publish one normalized
+Elite Cell account total from `thetower.player_save.cell_balance.v1`; exact
+1073, unknown forward versions, malformed totals, and changed semantic or raw
+bindings fail locally. The tracker accepts only complete typed acquisitions
+already owned by Home, attachment, passive, Perk-requested, or terminal paths.
+It never pulls a save or requests serialization.
+
+Accepted observations are stored in `cell_balance.sqlite3` beside the runtime
+control file using SQLite transactions, mode `0600`, a 90-day retention window,
+and a 30,000-sample cap. A later capture of unchanged bytes remains a useful
+flat checkpoint. Trend comparison requires the same hashed ADB target address,
+semantic fingerprint, and raw-binding fingerprint. A reconnect generation may
+continue that target's history; a different target starts independently, and a
+backward `saveRevision` opens a new continuity epoch so a cloud rollback is not
+reported as spending. The displayed trend uses the newest comparable baseline
+at least 24 hours old, or the first comparable sample when less history exists.
+It is net movement only: Cell generation, Lab Speedup charges, and save write
+lag are not decomposed or assigned a cause.
+
+`--cell-buffer CELLS` or `THETOWER_CELL_BUFFER=CELLS` adds a nonnegative reserve
+floor. Status reports headroom and, only while the observed net rate is
+negative, an estimated time to the floor. Crossing below the floor emits one
+operator warning until recovery. The tracker and control API always publish
+`ui_action_authority=false` and `automatic_reduction_enabled=false`; this
+release never opens Labs or changes a Lab Speedup. HTTP status polling reads
+only the retained summary and performs no ADB or save work.
 
 The causally bound natural terminal reuses the existing terminal bundle and
 checks terminal kind plus exact process/target/round/window provenance.

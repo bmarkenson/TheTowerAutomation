@@ -65,6 +65,12 @@ For example:
 .venv/bin/python main.py --adb-port 5555 --strategy farm_t19
 ```
 
+For exact supported saves, the runtime also retains a bounded Cell Balance
+history and shows total, comparable net trend, and optional reserve headroom in
+the Windows status band. Add a warning-only reserve floor with
+`--cell-buffer 25000000` or `THETOWER_CELL_BUFFER=25000000`. This does not
+change Lab Speedups.
+
 Startup now classifies the first fresh game view automatically. At verified
 Home **New Battle**, normal pre-battle checks always run. If the first view is
 an active battle or Home **Resume Battle**, the default policy attaches to that

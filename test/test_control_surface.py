@@ -321,6 +321,7 @@ def _publish_runtime_acknowledgements(
     strategy_scope: dict[str, object] | None = None,
     active_battle_screen_metrics: dict[str, object] | None = None,
     active_run_metrics: dict[str, object] | None = None,
+    cell_balance: dict[str, object] | None = None,
     observation_identity: str | None = None,
     observation_primary_state: str = "RUNNING",
     observation_game_state: str = "active_battle",
@@ -369,6 +370,8 @@ def _publish_runtime_acknowledgements(
         )
     if active_run_metrics is not None:
         control_model["active_run_metrics"] = active_run_metrics
+    if cell_balance is not None:
+        control_model["cell_balance"] = cell_balance
     if observation_identity is not None:
         observation = control_model["observation"]
         assert isinstance(observation, dict)
@@ -895,6 +898,211 @@ def test_status_exposes_only_fresh_exact_runtime_live_metrics(tmp_path):
     }
     assert stale["control_model"]["active_battle_screen_metrics"] is None
     assert stale["control_model"]["active_run_metrics"] is None
+
+
+def test_status_normalizes_observation_only_cell_balance(tmp_path):
+    now = datetime.now().astimezone().replace(microsecond=0)
+    captured_at = (now - timedelta(seconds=75)).isoformat(timespec="seconds")
+    control = _control_with_all_request_identities(tmp_path)
+    owner = {
+        "runtime_id": "runtime-cell-balance",
+        "pid": os.getpid(),
+        "adb_target": "localhost:5555",
+        "target_generation": 14,
+    }
+    lock_handle = _fresh_exact_runtime_lock(
+        tmp_path,
+        runtime_id="runtime-cell-balance",
+        target_generation=14,
+    )
+    _publish_runtime_acknowledgements(
+        tmp_path,
+        now=now,
+        owner=owner,
+        acknowledgements=_directive_acknowledgements(
+            control,
+            acknowledged_at=now.isoformat(timespec="seconds"),
+        ),
+        cell_balance={
+            "schema_version": 1,
+            "status": "observed",
+            "reason": "",
+            "captured_at": captured_at,
+            "balance_decimal": "25000000",
+            "unit": "cells",
+            "trend": {
+                "direction": "falling",
+                "basis": "24h_window",
+                "change_decimal": "-500000",
+                "elapsed_hours_decimal": "25",
+                "net_per_hour_decimal": "-20000",
+            },
+            "previous": {
+                "baseline_captured_at": (
+                    now - timedelta(hours=1, seconds=75)
+                ).isoformat(timespec="seconds"),
+                "change_decimal": "-25000",
+                "elapsed_hours_decimal": "1",
+                "net_per_hour_decimal": "-25000",
+            },
+            "buffer": {
+                "status": "above",
+                "floor_decimal": "20000000",
+                "headroom_decimal": "5000000",
+                "estimated_hours_to_floor_decimal": "250",
+                "automatic_reduction_enabled": False,
+            },
+            "history": {
+                "sample_count": 200,
+                "comparable_sample_count": 195,
+                "retention_days": 90,
+                "max_samples": 30000,
+            },
+            "provenance": {
+                "acquisition_type": "passive_stable_read",
+                "mapping_id": "data-9-game-1101",
+                "game_version": 1101,
+                "evidence_level": "structural_observation",
+                "target_fingerprint": "must-not-publish",
+                "semantic_fingerprint": "a" * 64,
+                "binding_fingerprint": "b" * 64,
+            },
+            "ui_action_authority": False,
+        },
+    )
+    try:
+        status = _service(tmp_path).status(now=now.timestamp())
+    finally:
+        lock_handle.close()
+
+    assert status["control_model"]["cell_balance"] == {
+        "schema_version": 1,
+        "status": "observed",
+        "reason": "",
+        "captured_at": captured_at,
+        "age_seconds": 75,
+        "balance_decimal": "25000000",
+        "unit": "cells",
+        "trend": {
+            "direction": "falling",
+            "basis": "24h_window",
+            "change_decimal": "-500000",
+            "elapsed_hours_decimal": "25",
+            "net_per_hour_decimal": "-20000",
+        },
+        "previous": {
+            "baseline_captured_at": (
+                now - timedelta(hours=1, seconds=75)
+            ).isoformat(timespec="seconds"),
+            "change_decimal": "-25000",
+            "elapsed_hours_decimal": "1",
+            "net_per_hour_decimal": "-25000",
+        },
+        "buffer": {
+            "status": "above",
+            "floor_decimal": "20000000",
+            "headroom_decimal": "5000000",
+            "estimated_hours_to_floor_decimal": "250",
+            "automatic_reduction_enabled": False,
+        },
+        "history": {
+            "sample_count": 200,
+            "comparable_sample_count": 195,
+            "retention_days": 90,
+            "max_samples": 30000,
+        },
+        "provenance": {
+            "acquisition_type": "passive_stable_read",
+            "mapping_id": "data-9-game-1101",
+            "game_version": 1101,
+            "evidence_level": "structural_observation",
+        },
+        "ui_action_authority": False,
+    }
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        {"ui_action_authority": True},
+        {"balance_decimal": "-1"},
+        {"buffer": {"automatic_reduction_enabled": True}},
+    ),
+)
+def test_status_rejects_malformed_or_actionable_cell_balance(
+    tmp_path,
+    mutation,
+):
+    now = datetime.now().astimezone().replace(microsecond=0)
+    control = _control_with_all_request_identities(tmp_path)
+    owner = {
+        "runtime_id": "runtime-invalid-cell-balance",
+        "pid": os.getpid(),
+        "adb_target": "localhost:5555",
+        "target_generation": 15,
+    }
+    payload = {
+        "schema_version": 1,
+        "status": "observed",
+        "reason": "",
+        "captured_at": now.isoformat(timespec="seconds"),
+        "balance_decimal": "1000",
+        "unit": "cells",
+        "trend": {
+            "direction": "unknown",
+            "basis": "insufficient_history",
+            "change_decimal": None,
+            "elapsed_hours_decimal": None,
+            "net_per_hour_decimal": None,
+        },
+        "previous": None,
+        "buffer": {
+            "status": "not_configured",
+            "floor_decimal": None,
+            "headroom_decimal": None,
+            "estimated_hours_to_floor_decimal": None,
+            "automatic_reduction_enabled": False,
+        },
+        "history": {
+            "sample_count": 1,
+            "comparable_sample_count": 1,
+            "retention_days": 90,
+            "max_samples": 30000,
+        },
+        "provenance": {
+            "acquisition_type": "passive_stable_read",
+            "mapping_id": "data-9-game-1101",
+            "game_version": 1101,
+            "evidence_level": "structural_observation",
+        },
+        "ui_action_authority": False,
+    }
+    for field, value in mutation.items():
+        if field == "buffer":
+            payload["buffer"].update(value)
+        else:
+            payload[field] = value
+    lock_handle = _fresh_exact_runtime_lock(
+        tmp_path,
+        runtime_id="runtime-invalid-cell-balance",
+        target_generation=15,
+    )
+    _publish_runtime_acknowledgements(
+        tmp_path,
+        now=now,
+        owner=owner,
+        acknowledgements=_directive_acknowledgements(
+            control,
+            acknowledged_at=now.isoformat(timespec="seconds"),
+        ),
+        cell_balance=payload,
+    )
+    try:
+        status = _service(tmp_path).status(now=now.timestamp())
+    finally:
+        lock_handle.close()
+
+    assert status["control_model"]["cell_balance"] is None
 
 
 def test_status_retains_same_battle_metrics_on_an_offscreen_frame(tmp_path):
@@ -4245,13 +4453,20 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert "When this battle ends" in html
     assert 'id="terminalPolicyStatus"' in html
     assert "RetryModeButton" not in native_xaml
-    assert "MinimumServerRevision = 50" in native_compatibility
+    assert "MinimumServerRevision = 51" in native_compatibility
     assert '"bounded_idle_timeout_v1"' in native_compatibility
     assert "bounded_idle_timeout_v1" in CONTROL_SURFACE_CAPABILITIES
     assert '"active_battle_screen_metrics_v1"' in native_compatibility
     assert "active_battle_screen_metrics_v1" in CONTROL_SURFACE_CAPABILITIES
     assert '"active_run_metrics_v1"' in native_compatibility
     assert "active_run_metrics_v1" in CONTROL_SURFACE_CAPABILITIES
+    assert '"cell_balance_tracking_v1"' in native_compatibility
+    assert "cell_balance_tracking_v1" in CONTROL_SURFACE_CAPABILITIES
+    assert 'x:Name="CellBalanceMetricPanel"' in native_xaml
+    assert 'x:Name="CellTrendMetricPanel"' in native_xaml
+    assert 'x:Name="CellBufferMetricPanel"' in native_xaml
+    assert 'JsonPropertyName("cell_balance")' in native_models
+    assert "CellBalancePresenter.Present(" in native_code
     assert '"emulator_host_selection_v1"' in native_compatibility
     assert "emulator_host_selection_v1" in CONTROL_SURFACE_CAPABILITIES
     assert 'x:Name="UseThisEmulatorButton"' in native_xaml

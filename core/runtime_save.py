@@ -21,8 +21,9 @@ from typing import Any, Optional
 from core.read_only_data import deep_freeze, deep_thaw
 
 
-RUNTIME_SAVE_SCHEMA_VERSION = 4
+RUNTIME_SAVE_SCHEMA_VERSION = 5
 ACTIVE_RUN_TALLIES_SCHEMA_VERSION = 1
+CELL_BALANCE_SCHEMA_VERSION = 1
 SURVIVAL_ABILITY_ACTIVATIONS_SCHEMA_VERSION = 1
 HISTORY_ENTRY_SCHEMA_VERSION = 1
 HISTORY_TAIL_IDENTITY_SCHEMA_VERSION = 2
@@ -210,6 +211,40 @@ class RuntimeTallyMetric:
         if self.terminal_source is not None:
             payload["terminal_source"] = self.terminal_source
         return payload
+
+
+@dataclass(frozen=True)
+class CellBalanceSnapshot:
+    """One allowlisted point-in-time Elite Cell account balance."""
+
+    status: str
+    reason: str
+    capability_id: str
+    semantic_fingerprint: str
+    binding_fingerprint: str
+    forward_policy: str
+    audit_id: str
+    evidence_level: str
+    value_decimal: str
+    source_fields: tuple[str, ...]
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": CELL_BALANCE_SCHEMA_VERSION,
+            "status": self.status,
+            "reason": self.reason,
+            "capability_id": self.capability_id,
+            "semantic_fingerprint": self.semantic_fingerprint,
+            "binding_fingerprint": self.binding_fingerprint,
+            "forward_policy": self.forward_policy,
+            "audit_id": self.audit_id,
+            "evidence_level": self.evidence_level,
+            "value_decimal": self.value_decimal,
+            "unit": "cells",
+            "source_fields": list(self.source_fields),
+            "temporal_scope": "point_in_time_account_balance",
+            "ui_action_authority": False,
+        }
 
 
 @dataclass(frozen=True)
@@ -617,6 +652,9 @@ class NormalizedRuntimeSave:
     active_tallies_status: str = "unavailable"
     active_tallies_reason: str = "mapping_unavailable"
     active_tallies: Optional[ActiveRunTalliesSnapshot] = None
+    cell_balance_status: str = "unavailable"
+    cell_balance_reason: str = "mapping_unavailable"
+    cell_balance: Optional[CellBalanceSnapshot] = None
     survival_ability_activations_status: str = "unavailable"
     survival_ability_activations_reason: str = "mapping_unavailable"
     survival_ability_activations: Optional[
@@ -702,6 +740,19 @@ class NormalizedRuntimeSave:
                         else "round_state_unavailable"
                     ),
                     "components": {},
+                    "ui_action_authority": False,
+                }
+            ),
+            "cell_balance": (
+                self.cell_balance.as_dict()
+                if self.cell_balance is not None
+                else {
+                    "schema_version": CELL_BALANCE_SCHEMA_VERSION,
+                    "status": self.cell_balance_status,
+                    "reason": self.cell_balance_reason,
+                    "value_decimal": None,
+                    "unit": "cells",
+                    "temporal_scope": "point_in_time_account_balance",
                     "ui_action_authority": False,
                 }
             ),
@@ -960,6 +1011,16 @@ def normalize_runtime_save(
             active_tallies_status = active_tallies.status
             active_tallies_reason = active_tallies.reason
 
+    try:
+        cell_balance = _normalize_cell_balance(decoded, runtime_spec)
+    except _ComponentUnavailable as exc:
+        cell_balance = None
+        cell_balance_status = "unavailable"
+        cell_balance_reason = str(exc)
+    else:
+        cell_balance_status = cell_balance.status
+        cell_balance_reason = cell_balance.reason
+
     if round_active is None:
         survival_ability_activations = None
         survival_ability_activations_status = "unavailable"
@@ -1006,6 +1067,9 @@ def normalize_runtime_save(
         active_tallies_status=active_tallies_status,
         active_tallies_reason=active_tallies_reason,
         active_tallies=active_tallies,
+        cell_balance_status=cell_balance_status,
+        cell_balance_reason=cell_balance_reason,
+        cell_balance=cell_balance,
         survival_ability_activations_status=(
             survival_ability_activations_status
         ),
@@ -1110,6 +1174,100 @@ def active_tally_contract_fingerprints(
         }
     )
     return semantic, binding
+
+
+def cell_balance_contract_fingerprints(
+    balance_spec: Mapping[str, Any],
+) -> tuple[str, str]:
+    """Return semantic and raw-binding fingerprints for Cell balance."""
+
+    capability_id = str(balance_spec.get("capability_id") or "").strip()
+    scope = balance_spec.get("scope")
+    field_spec = balance_spec.get("field")
+    if (
+        not capability_id
+        or not isinstance(scope, Mapping)
+        or not isinstance(field_spec, Mapping)
+    ):
+        raise RuntimeSaveNormalizationError(
+            "cell balance semantic contract is unavailable"
+        )
+    semantics = scope.get("semantics")
+    binding_scope = scope.get("binding")
+    if not isinstance(semantics, Mapping) or not isinstance(
+        binding_scope, Mapping
+    ):
+        raise RuntimeSaveNormalizationError(
+            "cell balance scope contract changed shape"
+        )
+    semantic = _fingerprint(
+        {
+            "capability_id": capability_id,
+            "scope": dict(semantics),
+            "field": {
+                "kind": field_spec.get("kind"),
+                "unit": field_spec.get("unit"),
+            },
+        }
+    )
+    binding = _fingerprint(
+        {
+            "capability_id": capability_id,
+            "scope": dict(binding_scope),
+            "field": {"source": field_spec.get("source")},
+        }
+    )
+    return semantic, binding
+
+
+def _normalize_cell_balance(
+    decoded: Mapping[str, Any],
+    runtime_spec: Mapping[str, Any],
+) -> CellBalanceSnapshot:
+    balance_spec = runtime_spec.get("cell_balance")
+    if not isinstance(balance_spec, Mapping):
+        raise _ComponentUnavailable("cell_balance_mapping_unavailable")
+    if balance_spec.get("schema_version") != CELL_BALANCE_SCHEMA_VERSION:
+        raise _ComponentUnavailable("cell_balance_mapping_schema_changed")
+    capability_id = str(balance_spec.get("capability_id") or "")
+    forward_policy = str(balance_spec.get("forward_policy") or "")
+    audit_id = str(balance_spec.get("audit_id") or "")
+    evidence_level = str(balance_spec.get("evidence_level") or "")
+    if (
+        capability_id != "thetower.player_save.cell_balance.v1"
+        or forward_policy != "exact_version_only"
+        or not audit_id
+        or evidence_level != "structural_observation"
+    ):
+        raise _ComponentUnavailable("cell_balance_mapping_authority_changed")
+    field_spec = balance_spec.get("field")
+    if not isinstance(field_spec, Mapping):
+        raise _ComponentUnavailable("cell_balance_field_mapping_unavailable")
+    source = str(field_spec.get("source") or "")
+    kind = str(field_spec.get("kind") or "")
+    unit = str(field_spec.get("unit") or "")
+    if not source or kind != "nonnegative_number" or unit != "cells":
+        raise _ComponentUnavailable("cell_balance_field_mapping_changed")
+    value = _active_tally_decimal(
+        decoded.get(source),
+        kind=kind,
+        label="cell_balance",
+    )
+    semantic_fingerprint, binding_fingerprint = (
+        cell_balance_contract_fingerprints(balance_spec)
+    )
+    return CellBalanceSnapshot(
+        status="observed",
+        reason="",
+        capability_id=capability_id,
+        semantic_fingerprint=semantic_fingerprint,
+        binding_fingerprint=binding_fingerprint,
+        forward_policy=forward_policy,
+        audit_id=audit_id,
+        evidence_level=evidence_level,
+        value_decimal=_decimal_text(value),
+        source_fields=(source,),
+    )
 
 
 def survival_activation_contract_fingerprints(
@@ -2695,6 +2853,7 @@ __all__ = [
     "BattleHistoryTail",
     "BattleHistoryTailIdentity",
     "CompletedBattleHistoryEntry",
+    "CellBalanceSnapshot",
     "NormalizedRuntimeSave",
     "RuntimePerkCalibration",
     "RuntimePerkCalibrationPick",
@@ -2708,6 +2867,7 @@ __all__ = [
     "RuntimeTallyMetric",
     "SurvivalAbilityActivationsSnapshot",
     "active_tally_contract_fingerprints",
+    "cell_balance_contract_fingerprints",
     "normalize_runtime_save",
     "runtime_with_perk_id_overrides",
     "survival_activation_contract_fingerprints",

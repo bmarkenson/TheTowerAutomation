@@ -1456,6 +1456,14 @@ Process request examples:
   expected-versus-observed requirement detail, recovery countdowns, and
   Return/Extend/Cancel recovery actions remain absent until their owning
   runtime status fields and guarded directives exist.
+- `cell_balance_tracking_v1` adds a separate account-scoped row for the latest
+  exact-version Cell total, comparable net trend, and optional reserve
+  headroom. It is not bound to the current battle. The runtime persists bounded
+  observations from already-owned save bundles; the API only validates and
+  redacts that summary, and status polling performs no save work. Target,
+  semantic, binding, or save-revision discontinuities restart comparison
+  instead of inventing Cell spending. Both server and client require false
+  action authority, and this release has no Lab Speedup mutation path.
 - Persistent indefinite and timed Pause, explicit Automation Enabled, and
   requested-versus-acknowledged state. The text defines Paused as zero
   automated input while observation continues and does not describe Enabled
@@ -1465,7 +1473,8 @@ Process request examples:
   pending/acknowledged/rejected/interrupted state comes from Linux, not local
   GUI inference. Start Automation always leaves actions Paused. This contract
   was introduced in server revision 30; the current client requires revision
-  48 plus `active_battle_screen_metrics_v1`, `active_run_metrics_v1`,
+  51 plus `active_battle_screen_metrics_v1`, `active_run_metrics_v1`,
+  `cell_balance_tracking_v1`,
   `better_control_model_v2`,
   `runtime_control_acknowledgements_v1`,
   `strategy_aware_attach_v1`,

@@ -43,6 +43,19 @@ automatic attached-battle validation. Manual `main.py --adb-port PORT
 --strategy NAME --startup-gates auto|auto_validate|immediate|next_run`
 arguments continue to override these defaults.
 
+The automation unit also reads the optional
+`~/.config/thetower/cell-balance.env`. Cell totals and their comparable net
+trend are tracked without configuration; this file adds a warning-only reserve
+floor:
+
+```text
+THETOWER_CELL_BUFFER=25000000
+```
+
+The value must be a nonnegative whole number. A direct launch may instead use
+`main.py --cell-buffer 25000000`. The floor affects status, headroom, and
+warnings only; it never changes a Lab Speedup.
+
 Complete Stop may retain a one-shot exact-battle handoff when fresh runtime
 evidence proves automation owns the active battle. The following Start uses
 `next_run` only for that launch, restores the normal persisted startup policy,

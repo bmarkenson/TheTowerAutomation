@@ -999,6 +999,7 @@ def checkpoint_environment(
         "PYTEST_ADDOPTS",
         "THETOWER_ADB_CONNECTION_OWNER",
         "THETOWER_ADB_PORT",
+        "THETOWER_CELL_BUFFER",
         "THETOWER_CONTROL_TOKEN",
         "THETOWER_PLAYER_SAVE_AUDIT",
         "THETOWER_STARTUP_GATES",
