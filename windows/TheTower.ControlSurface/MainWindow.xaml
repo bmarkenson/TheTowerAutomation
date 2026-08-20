@@ -85,6 +85,10 @@
                       IsEnabled="False" />
           </MenuItem>
           <MenuItem Header="_Preferences" Click="ShowPreferences_Click" />
+          <MenuItem Header="_Help">
+            <MenuItem Header="Workflow guides…"
+                      Click="OpenWorkflowGuides_Click" />
+          </MenuItem>
         </Menu>
       </Grid>
     </Border>
@@ -1184,6 +1188,13 @@
                                FontSize="10"
                                TextWrapping="Wrap"
                                Margin="6,5,6,0" />
+                    <Button Content="Move-PC guide…"
+                            Click="MoveEmulatorGuide_Click"
+                            HorizontalAlignment="Left"
+                            Padding="9,4"
+                            FontSize="10"
+                            Margin="4,10,4,0"
+                            ToolTip="Open the read-only source/destination checklist for moving a running emulator between Windows PCs." />
                   </StackPanel>
                 </Border>
 
@@ -1299,6 +1310,7 @@
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
                       </Grid.ColumnDefinitions>
                       <TextBlock Text="SYSTEM DIAGNOSTICS"
                                  Foreground="#62D5FF"
@@ -1318,6 +1330,12 @@
                               Click="HostHealthToggle_Click"
                               Padding="9,4"
                               FontSize="10" />
+                      <Button Grid.Column="3"
+                              Content="Restart guide…"
+                              Click="RestartBlueStacksGuide_Click"
+                              Padding="9,4"
+                              FontSize="10"
+                              ToolTip="Explain which evidence supports a coordinated BlueStacks restart and how to perform one safely." />
                     </Grid>
                     <Border x:Name="PreviousStatePanel"
                             Visibility="Collapsed"

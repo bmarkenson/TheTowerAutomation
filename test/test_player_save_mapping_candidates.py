@@ -173,6 +173,64 @@ def _compatible_killed_by_record() -> dict:
     )
 
 
+def _compatible_orb_record(
+    *,
+    locator: str,
+    raw_value: float,
+    semantic_value: str,
+) -> dict:
+    pending = pending_mapping_candidate(
+        value_kind="orb_distance_calibration",
+        raw_value=raw_value,
+        pairing_method="calibration_sample",
+        locator=locator,
+        expected_observation_count=2,
+        minimum_evidence_count=2,
+        scope={
+            "field": locator,
+            "attack_range": "98.38m",
+            "attack_range_contract": "a" * 64,
+        },
+    )
+    evidence = build_mapping_candidate_ui_evidence(
+        "orb_distance",
+        canonical_values=["80.37m", "60.00m"],
+        locator_values={
+            "innerOrbDistance": "80.37m",
+            "workshopOrbDistance": "60.00m",
+        },
+        locator_scopes={
+            field: {"field": field, "attack_range": "98.38m"}
+            for field in ("innerOrbDistance", "workshopOrbDistance")
+        },
+        observed_at=OBSERVED_AT,
+    )
+    resolved = resolve_mapping_candidates(
+        "orb_distance",
+        [pending],
+        evidence,
+    )[0]
+    assert resolved["semantic_value"] == semantic_value
+    mapping = {
+        **_mapping(resolution="compatible_exact_revision"),
+        "mapping_id": "data-9-game-1101",
+        "game_version": 1101,
+        "authority_mapping_id": "data-9-game-1073",
+        "structural_mapping_id": "data-9-game-1101",
+    }
+    return build_mapping_candidate_record(
+        mapping=mapping,
+        check_id="orb_distance",
+        candidate=resolved,
+        snapshot_fingerprint=SNAPSHOT_FINGERPRINT,
+        ui_evidence_fingerprint=UI_FINGERPRINT,
+        source_observation_fingerprint=SOURCE_OBSERVATION_FINGERPRINT,
+        workflow_provenance=_terminal_workflow("active_battle"),
+        observed_at=OBSERVED_AT,
+        recorded_at="2026-08-08T12:00:01+00:00",
+    )
+
+
 def _copy_mapping_pair_without_ray(repository_root: Path) -> Path:
     mapping_dir = repository_root / "config" / "player_save_versions"
     mapping_dir.mkdir(parents=True)
@@ -676,6 +734,86 @@ def test_compatible_killed_by_status_tracks_only_runtime_authority(tmp_path):
         repository_root=tmp_path,
     )
     assert integrated["counts"] == {"integrated": 1}
+
+
+def test_reviewed_orb_receipts_report_integrated_only_after_both_owners_match(
+    tmp_path,
+):
+    mapping_dir = tmp_path / "config" / "player_save_versions"
+    mapping_dir.mkdir(parents=True)
+    reviewed_value = {
+        "range_basis": "98.38m",
+        "extra": "80.37m",
+        "workshop": "60.00m",
+    }
+    mappings: dict[str, dict] = {}
+    for name in ("data_9_game_1073.json", "data_9_game_1101.json"):
+        mapping = json.loads(
+            (ROOT / "config/player_save_versions" / name).read_text(
+                encoding="utf-8"
+            )
+        )
+        mapping["orb_distance"]["values"] = [
+            option
+            for option in mapping["orb_distance"]["values"]
+            if option["value"] != reviewed_value
+        ]
+        mappings[name] = mapping
+        (mapping_dir / name).write_text(
+            json.dumps(mapping, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    store = AppendOnlyMappingCandidateStore(tmp_path / "receipts.jsonl")
+    records = (
+        _compatible_orb_record(
+            locator="innerOrbDistance",
+            raw_value=8.036911010742188,
+            semantic_value="80.37m",
+        ),
+        _compatible_orb_record(
+            locator="workshopOrbDistance",
+            raw_value=6.0,
+            semantic_value="60.00m",
+        ),
+    )
+    for record in records:
+        store.append_once(record)
+
+    pending = mapping_candidate_review_status(
+        store=store,
+        repository_root=tmp_path,
+    )
+    assert pending["counts"] == {"more_evidence_required": 2}
+
+    reviewed_option = {
+        "raw": {"extra": 8.0, "workshop": 6.0},
+        "value": reviewed_value,
+    }
+    authority = mappings["data_9_game_1073.json"]
+    authority["orb_distance"]["values"].append(reviewed_option)
+    (mapping_dir / "data_9_game_1073.json").write_text(
+        json.dumps(authority, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    partial = mapping_candidate_review_status(
+        store=store,
+        repository_root=tmp_path,
+    )
+    assert partial["counts"] == {"more_evidence_required": 2}
+
+    mirror = mappings["data_9_game_1101.json"]
+    mirror["orb_distance"]["values"].append(reviewed_option)
+    (mapping_dir / "data_9_game_1101.json").write_text(
+        json.dumps(mirror, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    integrated = mapping_candidate_review_status(
+        store=store,
+        repository_root=tmp_path,
+    )
+    assert integrated["counts"] == {"integrated": 2}
+    assert store.list_records() == list(records)
 
 
 def test_compatible_proposal_only_emits_the_missing_mirror_operation(tmp_path):

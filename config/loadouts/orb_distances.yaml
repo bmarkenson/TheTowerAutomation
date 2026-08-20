@@ -8,5 +8,5 @@ presets:
 
   tournament_range_98_38:
     range_basis: 98.38m
-    extra: 87.16m
-    workshop: 80.37m
+    extra: 80.37m
+    workshop: 60.00m

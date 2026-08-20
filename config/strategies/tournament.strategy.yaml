@@ -86,15 +86,15 @@ session_preflight:
       preset: tournament_range_98_38
       resolved:
         range_basis: 98.38m
-        extra: 87.16m
-        workshop: 80.37m
+        extra: 80.37m
+        workshop: 60.00m
       range_presets:
       - range_basis: 30.00m
         extra: 30.00m
         workshop: 39.00m
       - range_basis: 98.38m
-        extra: 87.16m
-        workshop: 80.37m
+        extra: 80.37m
+        workshop: 60.00m
 vars:
   exclusive_validation_battle: false
   ehls_completed: false
@@ -110,8 +110,6 @@ vars:
   level_skip_last_reason: ''
   damage_slider_checked: false
   damage_slider_observation: {}
-  orb_distance_checked: false
-  orb_distance_observation: {}
   gc_session_preflight_completed: false
   gc_session_preflight_attempted: false
   gc_session_preflight_degraded: false
@@ -122,6 +120,8 @@ vars:
   gc_session_preflight_last_status: ''
   gc_session_preflight_last_reason: ''
   gc_session_preflight_evidence: {}
+  orb_distance_checked: false
+  orb_distance_observation: {}
 per_run_reset:
 - exclusive_validation_battle
 - ehls_completed
@@ -171,15 +171,15 @@ rules:
   - type: orb_distance_configure
     mode: enforce
     range_basis: 98.38m
-    extra: 87.16m
-    workshop: 80.37m
+    extra: 80.37m
+    workshop: 60.00m
     range_presets:
     - range_basis: 30.00m
       extra: 30.00m
       workshop: 39.00m
     - range_basis: 98.38m
-      extra: 87.16m
-      workshop: 80.37m
+      extra: 80.37m
+      workshop: 60.00m
 - name: validate_tournament_session_preflight
   gate_phase: session_preflight
   run_when_attached: true
@@ -247,15 +247,15 @@ rules:
         preset: tournament_range_98_38
         resolved:
           range_basis: 98.38m
-          extra: 87.16m
-          workshop: 80.37m
+          extra: 80.37m
+          workshop: 60.00m
         range_presets:
         - range_basis: 30.00m
           extra: 30.00m
           workshop: 39.00m
         - range_basis: 98.38m
-          extra: 87.16m
-          workshop: 80.37m
+          extra: 80.37m
+          workshop: 60.00m
 run_configuration:
   schema_version: 2
   profile: tournament
@@ -313,15 +313,15 @@ run_configuration:
       preset: tournament_range_98_38
       resolved:
         range_basis: 98.38m
-        extra: 87.16m
-        workshop: 80.37m
+        extra: 80.37m
+        workshop: 60.00m
       range_presets:
       - range_basis: 30.00m
         extra: 30.00m
         workshop: 39.00m
       - range_basis: 98.38m
-        extra: 87.16m
-        workshop: 80.37m
+        extra: 80.37m
+        workshop: 60.00m
   runtime_policy:
     player_save_preflight: save_first
     handlers:

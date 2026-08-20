@@ -4134,16 +4134,31 @@ class ControlSurfaceService:
                     if process_active:
                         live_status = self.status()
                         state_ack = live_status["acknowledgements"].get("state")
+                        pause_resume_at = live_status["control"].get(
+                            "resume_at"
+                        )
+                        pause_is_active = (
+                            pause_resume_at is None
+                            or (
+                                not isinstance(pause_resume_at, bool)
+                                and isinstance(
+                                    pause_resume_at,
+                                    (int, float),
+                                )
+                                and math.isfinite(float(pause_resume_at))
+                                and float(pause_resume_at) > time.time()
+                            )
+                        )
                         if (
                             live_status["control"].get("state") != "PAUSED"
-                            or live_status["control"].get("resume_at") is not None
+                            or not pause_is_active
                             or not state_ack
                             or not state_ack.get("acknowledges_current")
                         ):
                             raise ControlSurfaceRequestError(
-                                "Indefinitely pause automation and wait for the "
-                                "runtime to acknowledge PAUSED before changing "
-                                "its live ADB target or emulator host",
+                                "Request an active Pause and wait for the runtime "
+                                "to acknowledge PAUSED before changing its live "
+                                "ADB target or emulator host",
                                 status=409,
                             )
                         manager.persist_adb_port(adb_port)

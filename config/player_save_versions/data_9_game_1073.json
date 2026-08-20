@@ -1241,6 +1241,17 @@
           "extra": "87.16m",
           "workshop": "80.37m"
         }
+      },
+      {
+        "raw": {
+          "extra": 8.0,
+          "workshop": 6.0
+        },
+        "value": {
+          "range_basis": "98.38m",
+          "extra": "80.37m",
+          "workshop": "60.00m"
+        }
       }
     ]
   },

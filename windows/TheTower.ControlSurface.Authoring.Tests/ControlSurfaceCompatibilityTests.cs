@@ -73,6 +73,57 @@ public sealed class ControlSurfaceCompatibilityTests
             result.MissingCapabilities);
     }
 
+    [Theory]
+    [InlineData(null, true)]
+    [InlineData(60, true)]
+    [InlineData(1, true)]
+    [InlineData(0, false)]
+    public void ActivePauseAcknowledgementAcceptsTimedOrIndefinitePause(
+        int? remainingSeconds,
+        bool expected)
+    {
+        var status = Status(ControlSurfaceCompatibility.MinimumServerRevision);
+        status.Control = new ControlStatus
+        {
+            State = "PAUSED",
+            RemainingSeconds = remainingSeconds,
+        };
+        status.Acknowledgements = new AcknowledgementStatus
+        {
+            State = new DirectiveAcknowledgement
+            {
+                Value = "PAUSED",
+                AcknowledgesCurrent = true,
+            },
+        };
+
+        Assert.Equal(
+            expected,
+            ControlSurfaceCompatibility.IsActivePauseAcknowledged(
+                status,
+                processActive: true));
+    }
+
+    [Fact]
+    public void ActivePauseAcknowledgementRequiresCurrentRuntimeReceipt()
+    {
+        var status = Status(ControlSurfaceCompatibility.MinimumServerRevision);
+        status.Control = new ControlStatus
+        {
+            State = "PAUSED",
+            RemainingSeconds = 60,
+        };
+
+        Assert.False(
+            ControlSurfaceCompatibility.IsActivePauseAcknowledged(
+                status,
+                processActive: true));
+        Assert.False(
+            ControlSurfaceCompatibility.IsActivePauseAcknowledged(
+                status,
+                processActive: false));
+    }
+
     [Fact]
     public void StrategyAwareAttachRequiresRevisionThirtyEight()
     {

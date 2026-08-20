@@ -156,8 +156,8 @@ def test_tournament_strategy_declares_exclusive_validation_then_observes():
         "type": "orb_distance_configure",
         "mode": "enforce",
         "range_basis": "98.38m",
-        "extra": "87.16m",
-        "workshop": "80.37m",
+        "extra": "80.37m",
+        "workshop": "60.00m",
         "range_presets": [
             {
                 "range_basis": "30.00m",
@@ -166,8 +166,8 @@ def test_tournament_strategy_declares_exclusive_validation_then_observes():
             },
             {
                 "range_basis": "98.38m",
-                "extra": "87.16m",
-                "workshop": "80.37m",
+                "extra": "80.37m",
+                "workshop": "60.00m",
             },
         ],
     }
@@ -220,8 +220,8 @@ def test_tournament_strategy_declares_exclusive_validation_then_observes():
         "preset": "tournament_range_98_38",
         "resolved": {
             "range_basis": "98.38m",
-            "extra": "87.16m",
-            "workshop": "80.37m",
+            "extra": "80.37m",
+            "workshop": "60.00m",
         },
         "range_presets": [
             {
@@ -231,8 +231,8 @@ def test_tournament_strategy_declares_exclusive_validation_then_observes():
             },
             {
                 "range_basis": "98.38m",
-                "extra": "87.16m",
-                "workshop": "80.37m",
+                "extra": "80.37m",
+                "workshop": "60.00m",
             },
         ],
     }

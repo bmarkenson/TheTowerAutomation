@@ -2278,6 +2278,40 @@ def test_v1073_stable_range_authorizes_the_same_orb_tuple(monkeypatch):
     assert snapshot.checks["orb_distance"].complete is True
 
 
+@pytest.mark.parametrize(
+    ("decoded_fn", "snapshot_fn"),
+    (
+        (_decoded_save, _snapshot),
+        (_decoded_save_v1101, _snapshot_v1101),
+    ),
+)
+def test_reviewed_orb_distance_variation_maps_on_both_owners(
+    monkeypatch,
+    decoded_fn,
+    snapshot_fn,
+):
+    decoded = decoded_fn()
+    decoded["upgradeWorkshopLevel"][4] = 79
+    decoded["upgradeLevel"][4] = 79
+    decoded["cardActive"][4] = True
+    decoded["cardLevel"][4] = 7
+    decoded.update(
+        innerOrbDistance=8.036911010742188,
+        workshopOrbDistance=6.0,
+    )
+
+    snapshot = snapshot_fn(monkeypatch, decoded)
+
+    assert snapshot.checks["attack_range"].value == "98.38m"
+    assert snapshot.checks["attack_range"].complete is True
+    assert snapshot.checks["orb_distance"].value == {
+        "range_basis": "98.38m",
+        "extra": "80.37m",
+        "workshop": "60.00m",
+    }
+    assert snapshot.checks["orb_distance"].complete is True
+
+
 def test_orb_distance_save_match_uses_calculated_attack_range(monkeypatch):
     decoded = _stable_tournament_range_save()
     decoded.update(

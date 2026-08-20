@@ -40,6 +40,7 @@ public partial class StrategyProfilesWindow : Window
     private bool _changingSelection;
     private StrategyAuthoringSource? _initialCapturedSource;
     private StrategyAuthoringResolution? _initialCapturedResolution;
+    private WorkflowGuidesWindow? _workflowGuidesWindow;
 
     public StrategyProfilesWindow(ControlSurfaceApi api)
         : this(api, null, null, null)
@@ -85,6 +86,29 @@ public partial class StrategyProfilesWindow : Window
         DisplayNameBox.TextChanged += DraftMetadata_Changed;
         TierBox.TextChanged += DraftMetadata_Changed;
         Loaded += async (_, _) => await LoadCatalogAsync();
+        Closed += (_, _) => _workflowGuidesWindow?.Close();
+    }
+
+    private void StrategyGuide_Click(object sender, RoutedEventArgs e)
+    {
+        if (_workflowGuidesWindow is not null)
+        {
+            _workflowGuidesWindow.SelectGuide(WorkflowGuideIds.EditStrategy);
+            if (_workflowGuidesWindow.WindowState == WindowState.Minimized)
+            {
+                _workflowGuidesWindow.WindowState = WindowState.Normal;
+            }
+            _workflowGuidesWindow.Activate();
+            return;
+        }
+
+        var guides = new WorkflowGuidesWindow(WorkflowGuideIds.EditStrategy)
+        {
+            Owner = this,
+        };
+        guides.Closed += (_, _) => _workflowGuidesWindow = null;
+        guides.Show();
+        _workflowGuidesWindow = guides;
     }
 
     private async Task LoadCatalogAsync(

@@ -287,8 +287,9 @@ current runtime state.
 **Stable ID:** `ISSUE-2026-017` · **Lifecycle:** `repair_awaiting_confirmation`
 
 - Saving a port did not move a running process, and
-  lost capture delayed Pause acknowledgement; live handoff requires acknowledged
-  indefinite Pause, new-target validation, and failure rollback to the old target.
+  lost capture delayed Pause acknowledgement; live handoff requires an active,
+  acknowledged timed or indefinite Pause, new-target validation, and failure
+  rollback to the old target.
   The explicit Windows host selector also revalidates an unchanged port, records
   host transitions, and excludes partial/mixed-host runs from host-specific CPH.
   The first active same-port move also proved that a destination can resume an
@@ -297,9 +298,9 @@ current runtime state.
   exposed that live save-backed rates must carry their binding to the new
   target when that same-battle identity is proved.
 - Load the [dossier](issues/open-2026.md#live-adb-target-move-could-not-be-applied-by-a-paused-runtime)
-  before a real move, recurrence, or handoff change. Next: deploy the metric-
-  continuity repair and verify a future same-battle handoff retains current
-  status rates and binds the following battle;
+  before a real move, recurrence, or handoff change. Next: verify a future
+  production same-battle handoff accepts the current timed Pause, retains
+  status rates, and binds the following battle;
   [operator-control backlog](backlog/runtime-and-validation.md#agreed-operator-control-sequence).
 
 ### Saved GUI ADB port was ignored by an outdated installed systemd unit

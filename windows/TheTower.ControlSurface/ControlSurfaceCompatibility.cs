@@ -137,6 +137,17 @@ internal static class ControlSurfaceCompatibility
         ControlSurfaceCompatibilityResult? compatibility) =>
         compatibility?.IsCompatible == true;
 
+    public static bool IsActivePauseAcknowledged(
+        StatusResponse status,
+        bool processActive) =>
+        processActive
+        && string.Equals(
+            status.Control.State,
+            "PAUSED",
+            StringComparison.OrdinalIgnoreCase)
+        && status.Control.RemainingSeconds is null or > 0
+        && status.Acknowledgements.State is { AcknowledgesCurrent: true };
+
     public static BetterControlActionAvailability ResolveAttachAvailability(
         BetterControlActionAvailability serverAvailability,
         bool strategySelectionDirty,

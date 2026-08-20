@@ -83,6 +83,31 @@ rotation as the Windows publisher only after both builds succeed. The GUI
 project explicitly enables Windows targeting; copy the complete result
 directory to Windows for runtime testing.
 
+## Workflow guides
+
+**Help > Workflow guides…** opens one modeless, version-matched reference
+window that can remain visible while the operator uses the main client. Its
+initial topics cover how the independent control layers fit together, moving a
+running emulator between Windows PCs, recognizing and performing a coordinated
+BlueStacks restart, and editing/publishing a Strategy. **System >
+Connections**, **System > Diagnostics**, and **Strategy profiles…** provide
+small contextual guide buttons that select the matching topic.
+
+The guide catalog is packaged in the GUI executable and requires no HTTP or
+repository checkout. It is deliberately read-only: its navigation button may
+open Overview, Connections, Diagnostics, or the existing Strategy Authoring
+window, but it has no API client, emulator controller, process action, control
+directive, or publication path. The destination surfaces retain all ordinary
+availability, confirmation, acknowledgement, and authority guards.
+
+The concise topics are operator-facing projections, not competing contract
+owners. Detailed current procedures remain in
+[`managed_runtime.md`](../../docs/operations/managed_runtime.md), BlueStacks
+recovery authority remains in
+[`control_surface.md`](../../docs/architecture/control_surface.md#automatic-bluestacks-degradation-recovery),
+and Strategy editing semantics remain in
+[`strategy_authoring.md`](../../docs/architecture/strategy_authoring.md#gui-contract).
+
 ## Connect
 
 The GUI starts `TheTower.TunnelHost.exe` on demand and controls it through a
@@ -124,7 +149,7 @@ An explicit Stop clears only that tunnel's desired state and cancels its retry.
 To move the emulator to this PC while reusing another PC's Linux port, first
 stop or reconfigure the former PC's ADB forward, then start this PC's forward.
 The client does not terminate another tunnel; a remaining owner is reported as
-a bind conflict. With automation indefinitely Paused and acknowledged, use
+a bind conflict. With an active timed or indefinite Pause acknowledged, use
 **System > Connections > Use this PC's emulator**. The command submits the
 active forward's actual endpoint plus this client's stable host identity, so
 Linux revalidates the emulator even when the target remains `localhost:5555`.
@@ -1098,12 +1123,12 @@ portrait evidence.
 **System > Services** shows the managed localhost ADB target as four distinct
 values: configured next start, requested/acknowledged directive, active
 runtime, and local draft. While automation is stopped, **Save for next start**
-stores a valid changed draft on Linux. While a live runtime has acknowledged
-indefinite **Pause**, **Switch live runtime** hands the existing process to the
-new target without recreating its startup/session gates. Polling does not
-replace a dirty draft; invalid or currently ineligible input remains visible
-until **Revert** or a successful apply. Wait for target acknowledgement before
-resuming; the existing validated API rollback leaves the runtime paused on its
+stores a valid changed draft on Linux. While a live runtime has acknowledged an
+active timed or indefinite **Pause**, **Switch live runtime** hands the existing
+process to the new target without recreating its startup/session gates. Polling
+does not replace a dirty draft; invalid or currently ineligible input remains
+visible until **Revert** or a successful apply. Wait for target acknowledgement
+before resuming; the existing validated API rollback leaves the runtime paused on its
 former target after a failed connection or capture. Paused handoff eligibility
 uses the durable exact state receipt, and target completion uses the durable
 exact ADB receipt; neither depends on retaining the corresponding Activity
@@ -1138,7 +1163,7 @@ supported capabilities. The Windows build carries an expected API version, a
 minimum server revision, and required capabilities. Any mismatch produces a
 prominent full-width **Linux API update required** banner, disables dependent
 actions, and gives disabled Start buttons the same blocker in a tooltip. The
-current Windows build requires revision 49, `bounded_idle_timeout_v1`,
+current Windows build requires revision 50, `bounded_idle_timeout_v1`,
 `active_battle_screen_metrics_v1`, `active_run_metrics_v1`,
 `current_battle_perks_v1`, `better_control_model_v2`,
 `runtime_control_acknowledgements_v1`,

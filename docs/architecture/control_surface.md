@@ -472,8 +472,9 @@ submits the active forward's actual Linux and Windows ports, the client's
 stable local host ID and name, and any exact listener process identity the
 client can inspect. The Linux runtime treats that declaration as a host
 handoff even when its `localhost:<port>` text is unchanged: acknowledged
-indefinite Pause is required, the current endpoint must produce a supported
-fresh frame, and success advances the target generation before acknowledgement.
+active Pause is required (unexpired timed or indefinite), the current endpoint
+must produce a supported fresh frame, and success advances the target
+generation before acknowledgement.
 The client never terminates or adopts another PC's tunnel. If that tunnel still
 owns the requested Linux listener, the new tunnel remains in visible conflict
 until the operator stops or reconfigures the former forward.
@@ -1392,7 +1393,13 @@ Process request examples:
   never starts, stops, or restarts automation or a tunnel. The application
   header groups four separately labelled Linux service, HTTP, API SSH, and ADB
   SSH signals and routes routine navigation through **View**, **Tools**, and
-  **Preferences** menus.
+  **Preferences**, plus a dedicated **Help** menu. **Help > Workflow
+  guides…** opens a modeless,
+  version-matched reference for the independent control layers, emulator-host
+  handoff, coordinated BlueStacks recovery, and Strategy authoring. Contextual
+  guide links select those same topics from Connections, Diagnostics, and
+  Strategy Authoring. The guide catalog has no API or device owner; it may only
+  navigate to existing surfaces, whose ordinary guards remain authoritative.
 - Preferences also contains the default-off BlueStacks recovery master, its
   independently retained lane/deferral options, and exact executable/instance
   settings. Enabling it permits automatic request creation only when Linux
@@ -1573,7 +1580,8 @@ Process request examples:
   analysis. This requires server revision 16 and capability
   `observed_game_speed`.
 - Persistent ADB-port selection for the next managed start, plus live handoff
-  while the runtime has acknowledged indefinite `PAUSED`. **System >
+  while the runtime has acknowledged an active timed or indefinite `PAUSED`.
+  **System >
   Services** shows configured next-start, requested/acknowledged, active
   runtime, and local-draft targets separately. Polling never replaces a dirty
   draft; an invalid or ineligible draft remains visible until explicit

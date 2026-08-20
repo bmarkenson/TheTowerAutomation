@@ -258,8 +258,8 @@ def test_tournament_profile_omits_non_applicable_auto_pick_perks():
         "preset": "tournament_range_98_38",
         "resolved": {
             "range_basis": "98.38m",
-            "extra": "87.16m",
-            "workshop": "80.37m",
+            "extra": "80.37m",
+            "workshop": "60.00m",
         },
         "range_presets": [
             {
@@ -269,8 +269,8 @@ def test_tournament_profile_omits_non_applicable_auto_pick_perks():
             },
             {
                 "range_basis": "98.38m",
-                "extra": "87.16m",
-                "workshop": "80.37m",
+                "extra": "80.37m",
+                "workshop": "60.00m",
             },
         ],
     }
