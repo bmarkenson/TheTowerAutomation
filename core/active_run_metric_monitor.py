@@ -59,7 +59,7 @@ class ActiveRunMetricMonitor:
         self._rejections: list[dict[str, Any]] = []
         self._pending_target_handoff: Optional[dict[str, Any]] = None
         self._target_handoffs: list[dict[str, Any]] = []
-        self._interval_segment = 0
+        self._target_epoch = 0
 
     def bind_context(
         self,
@@ -182,6 +182,7 @@ class ActiveRunMetricMonitor:
             "verified_at": acquisition.captured_at.isoformat(),
             "status": "verified_checkpoint_pending",
             "interval_continuity": None,
+            "target_epoch": self._target_epoch + 1,
         }
         self._context = context
         self._pending_target_handoff = transition
@@ -729,20 +730,16 @@ class ActiveRunMetricMonitor:
             )
             == context.target_binding.fingerprint
         )
-        interval_segment = self._interval_segment
+        target_epoch = self._target_epoch
         restart_interval = False
         if handoff_checkpoint:
-            pending_segment = pending_handoff.get("interval_segment")
-            if type(pending_segment) is int:
-                interval_segment = pending_segment
-                restart_interval = True
-            elif self._handoff_checkpoint_requires_interval_restart(
+            pending_epoch = pending_handoff.get("target_epoch")
+            if type(pending_epoch) is int:
+                target_epoch = pending_epoch
+            restart_interval = self._handoff_checkpoint_requires_interval_restart(
                 tallies,
                 checkpoint_wave=checkpoint_wave,
-            ):
-                interval_segment += 1
-                pending_handoff["interval_segment"] = interval_segment
-                restart_interval = True
+            )
         if self._wave_status == "conflict":
             checkpoint_wave = None
         elif checkpoint_wave is None:
@@ -806,7 +803,7 @@ class ActiveRunMetricMonitor:
                     context.target_binding.fingerprint
                 ),
                 restart_interval=restart_interval,
-                interval_segment=interval_segment,
+                target_epoch=target_epoch,
                 cross_target_interval=(
                     handoff_checkpoint and not restart_interval
                 ),
@@ -853,8 +850,7 @@ class ActiveRunMetricMonitor:
                 runtime.save_revision
             )
             pending_handoff["checkpoint_wave"] = checkpoint_wave
-            if restart_interval:
-                self._interval_segment = interval_segment
+            self._target_epoch = target_epoch
             self._pending_target_handoff = None
         return disposition
 
@@ -1076,7 +1072,7 @@ class ActiveRunMetricMonitor:
         real_time_seconds: Optional[Decimal],
         target_binding_fingerprint: str,
         restart_interval: bool,
-        interval_segment: int,
+        target_epoch: int,
         cross_target_interval: bool,
     ) -> str:
         state = self._components.setdefault(
@@ -1155,7 +1151,7 @@ class ActiveRunMetricMonitor:
             "interval_boundary": (
                 "same_battle_target_rollback" if restart_interval else None
             ),
-            "interval_segment": interval_segment,
+            "target_epoch": target_epoch,
             "real_time_seconds": (
                 _decimal_text(real_time_seconds)
                 if real_time_seconds is not None
@@ -1174,6 +1170,7 @@ class ActiveRunMetricMonitor:
         samples = state["samples"]
         if samples:
             prior = samples[-1]
+            same_source_handoff = False
             if sample["source_fingerprint"] == prior["source_fingerprint"]:
                 differing = [
                     key
@@ -1193,18 +1190,37 @@ class ActiveRunMetricMonitor:
                     derived_definitions,
                     set(differing),
                 )
-                return "conflict" if differing else "ignored"
-            if captured_at <= _timestamp(prior["captured_at"]):
+                if differing:
+                    return "conflict"
+                if not cross_target_interval:
+                    return "ignored"
+                if (
+                    save_revision != prior.get("save_revision")
+                    or metrics != prior.get("metrics")
+                    or derived != prior.get("derived")
+                    or saved_wave != prior.get("saved_wave")
+                    or sample["real_time_seconds"]
+                    != prior.get("real_time_seconds")
+                ):
+                    return "ignored"
+                same_source_handoff = True
+            if same_source_handoff:
+                sample["captured_at"] = prior["captured_at"]
+            elif captured_at <= _timestamp(prior["captured_at"]):
                 self._component_conflict(
                     component.name,
                     "newer_revision_capture_time_regressed",
                     state,
                 )
                 return "conflict"
-            if not restart_interval:
-                interval_samples = _interval_segment_samples(
-                    samples,
-                    interval_segment,
+            if not restart_interval and not same_source_handoff:
+                interval_samples = (
+                    samples
+                    if cross_target_interval
+                    else _target_epoch_samples(
+                        samples,
+                        target_epoch,
+                    )
                 )
                 regressed: list[str] = []
                 for key, value in tuple(metrics.items()):
@@ -1241,6 +1257,8 @@ class ActiveRunMetricMonitor:
                     if component.name == "economy"
                     else _component_interval(interval_samples, sample)
                 )
+            if same_source_handoff:
+                sample["interval"] = copy.deepcopy(prior.get("interval"))
         if sample["interval"] is not None:
             sample["interval_target_binding"] = (
                 "same_battle_handoff"
@@ -1298,9 +1316,9 @@ class ActiveRunMetricMonitor:
                 else "terminal_rate_clock_unavailable"
             )
         economy = self._components.get("economy") or {}
-        samples = _interval_segment_samples(
+        samples = _target_epoch_samples(
             economy.get("samples") or [],
-            self._interval_segment,
+            self._target_epoch,
         )
         prior = _latest_metric_sample(
             samples,
@@ -1386,9 +1404,9 @@ class ActiveRunMetricMonitor:
                 "status": "unavailable",
                 "reason": "terminal_report_unavailable",
             }
-        current_samples = _interval_segment_samples(
+        current_samples = _target_epoch_samples(
             samples,
-            self._interval_segment,
+            self._target_epoch,
         )
         definitions = state.get("definitions") or {}
         matched: dict[str, str] = {}
@@ -1531,7 +1549,7 @@ class ActiveRunMetricMonitor:
         self._rejections = []
         self._pending_target_handoff = None
         self._target_handoffs = []
-        self._interval_segment = 0
+        self._target_epoch = 0
 
 
 def _active_tally_terminal_tail(
@@ -1727,16 +1745,16 @@ def _latest_target_sample(
     return None
 
 
-def _interval_segment_samples(
+def _target_epoch_samples(
     samples: list[Mapping[str, Any]],
-    interval_segment: int,
+    target_epoch: int,
 ) -> list[Mapping[str, Any]]:
-    """Return checkpoints within one monotonic target-continuity segment."""
+    """Return checkpoints acquired within one exact target epoch."""
 
     return [
         sample
         for sample in samples
-        if sample.get("interval_segment") == interval_segment
+        if sample.get("target_epoch") == target_epoch
     ]
 
 

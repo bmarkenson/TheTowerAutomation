@@ -1724,6 +1724,29 @@ def test_verified_target_handoff_is_forwarded_to_save_projectors():
     assert call.kwargs["verified_target_handoff"] is True
 
 
+def test_same_battle_refresh_does_not_claim_a_verified_target_handoff():
+    app = App.__new__(App)
+    identity = _identity()
+    acquisition = _acquisition(identity, target_generation=8)
+    app._player_save_runtime_session_id = "runtime-1"
+    app._current_run_scope_id = Mock(return_value="scope-1")
+    app._publish_player_save_observation = Mock()
+    app._supervisor = SimpleNamespace(
+        battle_workflow=None,
+        manual_control=None,
+    )
+
+    app._publish_forced_battle_identity_bundle(
+        acquisition,
+        relation=BattleIdentityRelation.SAME_BATTLE,
+        identity_fingerprint=identity.fingerprint,
+    )
+
+    call = app._publish_player_save_observation.call_args
+    assert call.kwargs["bind_new_activity"] is False
+    assert call.kwargs["verified_target_handoff"] is False
+
+
 def test_verified_same_battle_handoff_rebinds_destination_perk_bundle():
     app = App.__new__(App)
     app._supervisor = Mock(is_paused=False)

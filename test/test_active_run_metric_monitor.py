@@ -1967,6 +1967,189 @@ def test_forced_same_battle_handoff_continues_nonregressing_interval_rates():
     assert monitor.latest_summary(next_battle) is None
 
 
+def test_forced_same_battle_handoff_aliases_an_unchanged_save_source():
+    monitor = ActiveRunMetricMonitor()
+    identity = _sha("round-1")
+    source = _context(generation=4, identity=identity)
+    destination = _context(generation=5, identity=identity)
+    first = _checkpoint(
+        10,
+        offset=100,
+        wave=100,
+        real=100,
+        game=500,
+        coins=1000,
+        cells=100,
+        cash=500,
+        progress=10,
+        coin_source=100,
+        resource=20,
+    )
+    second = _checkpoint(
+        11,
+        offset=200,
+        wave=200,
+        real=200,
+        game=1000,
+        coins=3000,
+        cells=300,
+        cash=900,
+        progress=20,
+        coin_source=400,
+        resource=60,
+    )
+    destination_copy = replace(
+        second,
+        capture={
+            **dict(second.capture),
+            "captured_at": (START + timedelta(seconds=300)).isoformat(),
+        },
+    )
+
+    assert _observe(monitor, first, context=source) == "accepted_checkpoint"
+    assert _observe(monitor, second, context=source) == "accepted_checkpoint"
+    source_summary = monitor.latest_summary(source)
+    assert source_summary is not None
+    acquisition = replace(
+        _acquisition(destination_copy, context=destination),
+        acquisition_type=PlayerSaveAcquisitionType.FORCED_SERIALIZATION,
+    )
+
+    assert monitor.continue_same_battle_at_target(
+        destination,
+        acquisition=acquisition,
+    )
+    assert monitor.observe_bundle(
+        acquisition,
+        context=destination,
+    ) == "accepted_checkpoint"
+
+    destination_summary = monitor.latest_summary(destination)
+    assert destination_summary is not None
+    assert destination_summary["source_fingerprint"] == (
+        source_summary["source_fingerprint"]
+    )
+    assert destination_summary["captured_at"] == source_summary["captured_at"]
+    assert destination_summary["interval"] == source_summary["interval"]
+    assert destination_summary["target_binding_fingerprint"] == (
+        destination.target_binding.fingerprint
+    )
+    evidence = monitor.terminal_evidence(
+        context=destination,
+        terminal_save_report=None,
+    )
+    assert evidence["components"]["economy"]["samples"][-1][
+        "interval_target_binding"
+    ] == "same_battle_handoff"
+
+
+def test_nonregressing_handoff_restarts_a_missing_leaf_on_destination():
+    monitor = ActiveRunMetricMonitor()
+    identity = _sha("round-1")
+    source = _context(generation=4, identity=identity)
+    destination = _context(generation=5, identity=identity)
+    source_checkpoint = _checkpoint(
+        20,
+        offset=500,
+        wave=500,
+        real=500,
+        game=2500,
+        coins=5000,
+        cells=500,
+        cash=1000,
+        progress=50,
+        coin_source=2000,
+        resource=200,
+    )
+    destination_checkpoint = _checkpoint(
+        21,
+        offset=600,
+        wave=520,
+        real=520,
+        game=2600,
+        coins=6000,
+        cells=600,
+        cash=1040,
+        progress=52,
+        coin_source=2100,
+        resource=240,
+    )
+    tallies = destination_checkpoint.active_tallies
+    assert tallies is not None
+    destination_checkpoint = replace(
+        destination_checkpoint,
+        active_tallies=replace(
+            tallies,
+            status="partial",
+            reason="one_or_more_active_tally_claims_unavailable",
+            components=tuple(
+                replace(
+                    component,
+                    status="unavailable",
+                    reason="all_tally_claims_unavailable",
+                    metrics=(),
+                    derived=(),
+                    unavailable=tuple(
+                        (name, "temporary_unavailable")
+                        for name, _definition in component.claim_definitions
+                    ),
+                )
+                if component.name == "coin_sources"
+                else component
+                for component in tallies.components
+            ),
+        ),
+        active_tallies_status="partial",
+    )
+    destination_later = _checkpoint(
+        22,
+        offset=700,
+        wave=540,
+        real=540,
+        game=2700,
+        coins=6500,
+        cells=650,
+        cash=1080,
+        progress=54,
+        coin_source=1200,
+        resource=250,
+    )
+
+    assert _observe(
+        monitor,
+        source_checkpoint,
+        context=source,
+    ) == "accepted_checkpoint"
+    acquisition = replace(
+        _acquisition(destination_checkpoint, context=destination),
+        acquisition_type=PlayerSaveAcquisitionType.FORCED_SERIALIZATION,
+    )
+    assert monitor.continue_same_battle_at_target(
+        destination,
+        acquisition=acquisition,
+    )
+    assert monitor.observe_bundle(
+        acquisition,
+        context=destination,
+    ) == "accepted_partial_checkpoint"
+    assert _observe(
+        monitor,
+        destination_later,
+        context=destination,
+    ) == "accepted_checkpoint"
+
+    evidence = monitor.terminal_evidence(
+        context=destination,
+        terminal_save_report=None,
+    )
+    coin_sources = evidence["components"]["coin_sources"]
+    assert coin_sources["metric_conflicts"] == {}
+    assert coin_sources["samples"][-1]["metrics"][
+        "coins_from_black_hole"
+    ] == "1200"
+    assert coin_sources["samples"][-1]["interval"] is None
+
+
 def test_forced_same_battle_handoff_restarts_interval_after_cloud_rollback():
     monitor = ActiveRunMetricMonitor()
     identity = _sha("round-1")
@@ -2085,6 +2268,12 @@ def test_forced_same_battle_handoff_restarts_interval_after_cloud_rollback():
     assert current["interval"]["coins_per_hour"] == "108000"
     assert current["interval"]["waves_per_hour"] == "3600"
     assert current["whole_run"]["cells_earned"] == "600"
+    performance = monitor.performance_evidence(destination)
+    assert performance is not None
+    assert len(performance["checkpoints"]) == 1
+    assert performance["checkpoints"][0]["interval"][
+        "coins_per_hour"
+    ] == "108000"
     evidence = monitor.terminal_evidence(
         context=destination,
         terminal_save_report=None,
