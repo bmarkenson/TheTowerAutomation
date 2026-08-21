@@ -44,6 +44,9 @@ public sealed class ControlSurfaceCompatibilityTests
         Assert.Contains("lab_speed_reserve_planner_v1", result.MissingCapabilities);
         Assert.Contains("current_battle_perks_v1", result.MissingCapabilities);
         Assert.Contains(
+            "current_run_phase_timing_v1",
+            result.MissingCapabilities);
+        Assert.Contains(
             "confirmed_local_mapping_status_v2",
             result.MissingCapabilities);
         Assert.Contains(
@@ -559,6 +562,7 @@ public sealed class ControlSurfaceCompatibilityTests
                 "confirmed_local_mapping_status_v2",
                 "current_battle_perks_v1",
                 "current_run_activity_scope",
+                "current_run_phase_timing_v1",
                 "exclusive_strategy_validation_status",
                 "emulator_host_selection_v1",
                 "explicit_strategy_disposition",

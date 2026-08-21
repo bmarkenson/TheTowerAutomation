@@ -1587,6 +1587,9 @@ public sealed class CurrentRunStatus
 
     [JsonPropertyName("started_at")]
     public string? StartedAt { get; set; }
+
+    [JsonPropertyName("battle_started_at")]
+    public string? BattleStartedAt { get; set; }
 }
 
 public sealed class CurrentBattlePerksStatus

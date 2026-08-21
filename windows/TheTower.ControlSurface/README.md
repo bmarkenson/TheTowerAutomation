@@ -321,13 +321,19 @@ its separately displayed active endpoint until explicit Start/Restart adopts a
 changed default. The optional bearer token remains memory-only and is never
 written to either settings file.
 
-The status band shows run elapsed only when a managed process and a valid
-current activity scope are both present. It calculates that value from the
-scope's published start and the same response's Linux server timestamp, not
-from Activity prose or the Windows clock. **Screen Age** is the age of the
-latest canonical main-loop screen observation. It is not the sparse log
-summary age, the five-second Windows polling interval, or a countdown to the
-next screenshot. Wave is read from every canonical Running frame and is never
+The status band shows phase elapsed only when a managed process and a valid
+current activity scope are both present. Before a battle starts it labels the
+cell **Activity Elapsed** and counts Home, setup, and Pause time from the
+report-segment boundary. The first genuine battle start stamps that same scope,
+switches the cell to **Run Elapsed**, and resets the displayed clock to the
+battle-start marker without discarding the earlier between-run boundary. Both
+values use the same response's Linux server timestamp, not Activity prose or
+the Windows clock. They are presentation/report clocks only: whole-run and
+recent save-backed CPH continue to use the game's validated real-time counters.
+**Screen Age** is the age of the latest canonical main-loop screen observation.
+It is not the sparse log summary age, the five-second Windows polling interval,
+or a countdown to the next screenshot. Wave is read from every canonical
+Running frame and is never
 advanced from timing alone. On a Wave OCR miss or a temporary off-battle
 screen in the same exact round, the last proven value remains visible with a
 muted `*`. Coins/min keeps its independent periodic OCR cadence and receives
@@ -930,8 +936,10 @@ segment. It may survive an automation stop/restart, and verified Home
 it so related setup and report entries remain grouped. Already-acquired Battle
 History projections may enrich that segment as best-effort metadata, but they
 never trigger a save read or UI inspection and never decide whether a battle
-is the same or later. Linux uses the forced save's `ActiveRoundIdentity` for
-that decision. **All recent** restores the rolling log tail. **Clear view**
+is the same or later. A genuine battle start adds its phase marker to the
+existing segment rather than replacing the Home/setup entries. Linux uses the
+forced save's `ActiveRoundIdentity` for identity decisions. **All recent**
+restores the rolling log tail. **Clear view**
 records a local cursor and hides only entries already displayed; it never
 deletes or truncates Linux logs, and **Show cleared** restores them. A new
 report segment or log rotation resets that local cutoff.
@@ -1177,8 +1185,9 @@ supported capabilities. The Windows build carries an expected API version, a
 minimum server revision, and required capabilities. Any mismatch produces a
 prominent full-width **Linux API update required** banner, disables dependent
 actions, and gives disabled Start buttons the same blocker in a tooltip. The
-current Windows build requires revision 53, `bounded_idle_timeout_v1`,
+current Windows build requires revision 54, `bounded_idle_timeout_v1`,
 `active_battle_screen_metrics_v1`, `active_run_metrics_v1`,
+`current_run_phase_timing_v1`,
 `cell_balance_tracking_v1`, `lab_speed_reserve_planner_v1`,
 `current_battle_perks_v1`, `better_control_model_v2`,
 `runtime_control_acknowledgements_v1`,

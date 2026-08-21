@@ -112,7 +112,7 @@ DEFAULT_STALE_AFTER_SECONDS = 180
 EMULATOR_DEGRADATION_CACHE_SECONDS = 60.0
 # Advance this when a newer Windows client must reload the resident service,
 # and advance that client's MinimumServerRevision in the same change.
-CONTROL_SURFACE_REVISION = 53
+CONTROL_SURFACE_REVISION = 54
 CONTROL_SURFACE_CAPABILITIES = (
     "active_battle_screen_metrics_v1",
     "active_battle_strategy_adoption",
@@ -127,6 +127,7 @@ CONTROL_SURFACE_CAPABILITIES = (
     "confirmed_local_mapping_status_v2",
     "current_battle_perks_v1",
     "current_run_activity_scope",
+    "current_run_phase_timing_v1",
     "exclusive_strategy_validation_status",
     "emulator_host_selection_v1",
     "explicit_strategy_disposition",
@@ -1554,6 +1555,9 @@ class ControlSurfaceService:
                 {
                     "run_id": current_run["run_id"],
                     "started_at": current_run["started_at"],
+                    "battle_started_at": current_run.get(
+                        "battle_started_at"
+                    ),
                 }
                 if current_run is not None
                 else None
@@ -5203,16 +5207,27 @@ class ControlSurfaceService:
             start_offset = int(payload.get("start_offset"))
         except (TypeError, ValueError):
             return None
+        parsed_scope_start = _parse_timestamp(started_at)
         if (
             not run_id
-            or _parse_timestamp(started_at) is None
+            or parsed_scope_start is None
             or not re.fullmatch(r"\d+:\d+", source_file_id)
             or start_offset < 0
         ):
             return None
+        battle_started_at = str(
+            payload.get("battle_started_at") or ""
+        ).strip()
+        parsed_battle_start = _parse_timestamp(battle_started_at)
+        if (
+            parsed_battle_start is None
+            or parsed_battle_start < parsed_scope_start
+        ):
+            battle_started_at = ""
         return {
             "run_id": run_id,
             "started_at": started_at,
+            "battle_started_at": battle_started_at or None,
             "source_file_id": source_file_id,
             "start_offset": start_offset,
         }

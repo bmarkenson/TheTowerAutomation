@@ -1003,16 +1003,24 @@ class RunBoundaryTests(unittest.TestCase):
         manager = MissionManager(None, strategy)
         manager.start()
 
-        with patch(
-            "automation.missions.manager.start_activity_scope"
-        ) as start_activity_scope:
+        with (
+            patch(
+                "automation.missions.manager.start_activity_scope"
+            ) as start_activity_scope,
+            patch(
+                "automation.missions.manager.record_activity_scope_battle_started"
+            ) as record_battle_started,
+        ):
             manager.maybe_run_start({"state": "RUNNING"})
+            record_battle_started.assert_called_once_with()
+            record_battle_started.reset_mock()
             manager.maybe_run_start(
                 {"state": "HOME_SCREEN", "home_battle_control": "NEW_BATTLE"}
             )
             manager.maybe_run_start(
                 {"state": "HOME_SCREEN", "home_battle_control": "NEW_BATTLE"}
             )
+            record_battle_started.assert_not_called()
             manager.maybe_run_start({"state": "RUNNING"})
 
         self.assertEqual(strategy.run_starts, 2)
@@ -1020,6 +1028,7 @@ class RunBoundaryTests(unittest.TestCase):
             reason="new_battle_preflight",
             carry_terminal_history_handoff=True,
         )
+        record_battle_started.assert_called_once_with()
 
     def test_strategy_replacement_preserves_observed_home_run_boundary(self):
         manager = MissionManager(None, _RunCountingStrategy())

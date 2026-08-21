@@ -8,6 +8,7 @@ from utils.logger import (
     log,
     log_mission,
     normalize_session_preflight_report_evidence,
+    record_activity_scope_battle_started,
     start_activity_scope,
 )
 from automation.missions.base import BaseMission, MissionContext
@@ -237,6 +238,7 @@ class MissionManager:
             self._authorized_initial_battle_intent = None
             self._authorized_battle_workflow_request_id = None
         if battle_started:
+            record_activity_scope_battle_started()
             self._clear_restored_session_preflight_report()
             self._arm_startup_gates()
             self.set_exclusive_validation_battle(False)

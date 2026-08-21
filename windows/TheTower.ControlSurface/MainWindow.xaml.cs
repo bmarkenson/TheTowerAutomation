@@ -3741,11 +3741,14 @@ public partial class MainWindow : Window
             CellBalancePresenter.Present(
                 status.ControlModel?.CellBalance));
         RenderLabSpeedPlan(status.LabSpeedPlan);
-        var runElapsed = FormatRunElapsed(
+        var runPhaseElapsed = RunPhaseElapsedPresenter.Present(
             status.CurrentRun,
             status.ServerTime);
-        RunElapsedText.Text = runElapsed ?? "";
-        RunElapsedMetricPanel.Visibility = processActive && runElapsed is not null
+        RunElapsedLabelText.Text = runPhaseElapsed.Label;
+        RunElapsedText.Text = runPhaseElapsed.Elapsed ?? "";
+        RunElapsedMetricPanel.ToolTip = runPhaseElapsed.Detail;
+        RunElapsedMetricPanel.Visibility = processActive
+            && runPhaseElapsed.Elapsed is not null
             ? Visibility.Visible
             : Visibility.Collapsed;
         ProcessStateText.Text = processActive
@@ -5677,22 +5680,6 @@ public partial class MainWindow : Window
             : seconds < 3600
                 ? $"{seconds / 60}m"
                 : $"{seconds / 3600}h {seconds % 3600 / 60}m";
-    }
-
-    private static string? FormatRunElapsed(
-        CurrentRunStatus? currentRun,
-        string? serverTime)
-    {
-        if (!DateTimeOffset.TryParse(currentRun?.StartedAt, out var startedAt)
-            || !DateTimeOffset.TryParse(serverTime, out var observedAt)
-            || observedAt < startedAt)
-        {
-            return null;
-        }
-        var seconds = (int)Math.Min(
-            Math.Floor((observedAt - startedAt).TotalSeconds),
-            int.MaxValue);
-        return FormatAge(seconds);
     }
 
     private void RenderActiveRunMetrics(

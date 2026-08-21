@@ -160,6 +160,36 @@ def test_ensure_activity_scope_creates_missing_boundary(tmp_path, monkeypatch):
     ) == scope
 
 
+def test_battle_start_stamp_preserves_the_between_run_scope(
+    tmp_path,
+    monkeypatch,
+):
+    isolated_log = tmp_path / "logs" / "actions.log"
+    monkeypatch.setenv("TOWER_ACTION_LOG_PATH", str(isolated_log))
+    scope = logger.start_activity_scope(reason="new_battle_preflight")
+    assert scope is not None
+
+    marked = logger.record_activity_scope_battle_started()
+    repeated = logger.record_activity_scope_battle_started()
+
+    assert marked is not None
+    assert repeated == marked
+    assert marked["run_id"] == scope["run_id"]
+    assert marked["started_at"] == scope["started_at"]
+    assert datetime.fromisoformat(str(marked["battle_started_at"])) >= (
+        datetime.fromisoformat(str(scope["started_at"]))
+    )
+    saved = json.loads(
+        (tmp_path / "logs" / "activity_scope.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert saved == marked
+    assert isolated_log.read_text(encoding="utf-8").count(
+        "[RUN_SCOPE] Current battle timing started"
+    ) == 1
+
+
 def test_start_activity_scope_can_reuse_an_earlier_log_boundary(
     tmp_path,
     monkeypatch,

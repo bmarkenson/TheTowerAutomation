@@ -1418,12 +1418,22 @@ Process request examples:
   configuration labels current, pending-next/startup, and locally selected
   Strategy separately; the latest completed battle remains useful as a compact
   one-line summary when its detail is collapsed.
-- The global status derives run elapsed only from the published current-run
-  activity-scope start and the atomic server timestamp. `SCREEN AGE` is the age
-  of the latest canonical main-loop observation, not the periodic log summary,
-  Windows polling interval, or a promised next screenshot. Wave OCR runs on
-  each canonical `RUNNING` frame. A miss, or a temporary non-battle screen in
-  the same exact active round, retains the last proven Wave with a muted `*`;
+- The global status publishes both the current activity/report segment start
+  and its optional genuine battle-start marker. Before that marker, the native
+  timer is labelled `ACTIVITY ELAPSED` and includes Home, setup, and Pause time
+  from the report-segment boundary. The first lifecycle-owned battle start
+  stamps the existing scope without rotating it; the timer switches to `RUN
+  ELAPSED` and resets its basis to that marker while the earlier boundary
+  remains available for between-run and overall wall-clock reporting. Both
+  values use the atomic server timestamp, not the Windows clock. Neither timer
+  supplies save-backed CPH: whole-run and recent CPH continue to use validated
+  game `real_time_seconds`. Server revision 54 and capability
+  `current_run_phase_timing_v1` own this additive timing contract. `SCREEN AGE`
+  is the age of the latest canonical main-loop observation, not the periodic
+  log summary, Windows polling interval, or a promised next screenshot. Wave
+  OCR runs on each canonical `RUNNING` frame. A miss, or a temporary
+  non-battle screen in the same exact active round, retains the last proven
+  Wave with a muted `*`;
   Wave is never extrapolated. Coins/min remains an independently periodic OCR
   sample and is carried in each later structured snapshot; it receives the
   same `*` while the current screen is off-battle. Tooltips give the source and

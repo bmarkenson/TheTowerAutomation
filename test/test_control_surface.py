@@ -399,20 +399,26 @@ def _control_with_all_request_identities(root: Path) -> dict[str, object]:
     return store.status()
 
 
-def _write_current_run_scope(root: Path, *, run_id: str) -> None:
+def _write_current_run_scope(
+    root: Path,
+    *,
+    run_id: str,
+    battle_started_at: str | None = None,
+) -> None:
     logs = root / "logs"
     logs.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema_version": 1,
+        "scope": "current_run",
+        "run_id": run_id,
+        "started_at": "2026-08-08T10:00:00-07:00",
+        "source_file_id": "1:1",
+        "start_offset": 0,
+    }
+    if battle_started_at is not None:
+        payload["battle_started_at"] = battle_started_at
     (logs / "activity_scope.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "scope": "current_run",
-                "run_id": run_id,
-                "started_at": "2026-08-08T10:00:00-07:00",
-                "source_file_id": "1:1",
-                "start_offset": 0,
-            }
-        ),
+        json.dumps(payload),
         encoding="utf-8",
     )
 
@@ -4526,7 +4532,7 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert "When this battle ends" in html
     assert 'id="terminalPolicyStatus"' in html
     assert "RetryModeButton" not in native_xaml
-    assert "MinimumServerRevision = 53" in native_compatibility
+    assert "MinimumServerRevision = 54" in native_compatibility
     assert '"bounded_idle_timeout_v1"' in native_compatibility
     assert "bounded_idle_timeout_v1" in CONTROL_SURFACE_CAPABILITIES
     assert "paused_terminal_save_refresh_v1" in CONTROL_SURFACE_CAPABILITIES
@@ -4535,6 +4541,8 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert "active_battle_screen_metrics_v1" in CONTROL_SURFACE_CAPABILITIES
     assert '"active_run_metrics_v1"' in native_compatibility
     assert "active_run_metrics_v1" in CONTROL_SURFACE_CAPABILITIES
+    assert '"current_run_phase_timing_v1"' in native_compatibility
+    assert "current_run_phase_timing_v1" in CONTROL_SURFACE_CAPABILITIES
     assert '"cell_balance_tracking_v1"' in native_compatibility
     assert "cell_balance_tracking_v1" in CONTROL_SURFACE_CAPABILITIES
     assert 'x:Name="CellBalanceMetricPanel"' in native_xaml
@@ -4900,6 +4908,9 @@ def test_native_status_uses_only_published_dashboard_metrics():
     native_presenter = (native_root / "ActiveRunMetricPresenter.cs").read_text(
         encoding="utf-8"
     )
+    phase_presenter = (native_root / "RunPhaseElapsedPresenter.cs").read_text(
+        encoding="utf-8"
+    )
     screen_presenter = (
         native_root / "BattleScreenMetricPresenter.cs"
     ).read_text(encoding="utf-8")
@@ -4907,16 +4918,21 @@ def test_native_status_uses_only_published_dashboard_metrics():
     assert 'JsonPropertyName("server_time")' in native_models
     assert 'JsonPropertyName("current_run")' in native_models
     assert 'JsonPropertyName("started_at")' in native_models
+    assert 'JsonPropertyName("battle_started_at")' in native_models
     assert 'x:Name="RunElapsedMetricPanel"' in native_xaml
+    assert 'x:Name="RunElapsedLabelText"' in native_xaml
     assert 'x:Name="RunElapsedText"' in native_xaml
     assert 'x:Name="WaveMetricPanel" Visibility="Collapsed"' in native_xaml
     assert (
         'x:Name="CoinsMinuteMetricPanel" Visibility="Collapsed"'
         in native_xaml
     )
-    assert "FormatRunElapsed(" in native_code
+    assert "RunPhaseElapsedPresenter.Present(" in native_code
     assert "status.ServerTime" in native_code
     assert "RunElapsedMetricPanel.Visibility = processActive" in native_code
+    assert 'Text="ACTIVITY ELAPSED"' in native_xaml
+    assert 'private const string RunLabel = "RUN ELAPSED"' in phase_presenter
+    assert "Save-backed CPH uses game run time" in phase_presenter
     assert "ActiveBattle: true" in native_code
     assert 'Text="SCREEN AGE"' in native_xaml
     assert 'Text="HEARTBEAT"' not in native_xaml
@@ -6003,6 +6019,16 @@ def test_activity_current_run_scope_uses_explicit_boundary(tmp_path, monkeypatch
     assert service.status()["current_run"] == {
         "run_id": scope["run_id"],
         "started_at": scope["started_at"],
+        "battle_started_at": None,
+    }
+
+    marked = logger.record_activity_scope_battle_started()
+
+    assert marked is not None
+    assert service.status()["current_run"] == {
+        "run_id": scope["run_id"],
+        "started_at": scope["started_at"],
+        "battle_started_at": marked["battle_started_at"],
     }
 
 

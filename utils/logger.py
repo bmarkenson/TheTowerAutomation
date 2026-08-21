@@ -123,6 +123,57 @@ def start_retry_activity_scope() -> Optional[dict[str, object]]:
     )
 
 
+def record_activity_scope_battle_started() -> Optional[dict[str, object]]:
+    """Stamp the current report scope once when its battle actually starts."""
+
+    scope_path = get_activity_scope_path()
+    write_error: Optional[OSError] = None
+    updated = False
+    with _WRITE_LOCK:
+        payload = _load_activity_scope()
+        if payload is None:
+            return None
+        scope_started_at = datetime.fromisoformat(str(payload["started_at"]))
+        if scope_started_at.tzinfo is None:
+            scope_started_at = scope_started_at.astimezone()
+        existing_text = str(payload.get("battle_started_at") or "").strip()
+        try:
+            existing_started_at = datetime.fromisoformat(existing_text)
+            if existing_started_at.tzinfo is None:
+                existing_started_at = existing_started_at.astimezone()
+        except ValueError:
+            existing_started_at = None
+        if (
+            existing_started_at is not None
+            and existing_started_at >= scope_started_at
+        ):
+            return dict(payload)
+        observed_at = max(datetime.now().astimezone(), scope_started_at)
+        payload["battle_started_at"] = observed_at.isoformat(
+            timespec="microseconds"
+        )
+        try:
+            _write_json_atomic(scope_path, payload)
+            updated = True
+        except OSError as exc:
+            write_error = exc
+
+    if write_error is not None:
+        log(
+            "[RUN_SCOPE] Unable to persist the current battle-start timing: "
+            f"{write_error}",
+            "WARN",
+        )
+        return None
+    if updated:
+        log(
+            "[RUN_SCOPE] Current battle timing started "
+            f"id={payload['run_id']}",
+            "INFO",
+        )
+    return dict(payload)
+
+
 def _start_activity_scope(
     *,
     reason: str,
