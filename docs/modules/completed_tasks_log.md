@@ -39,6 +39,27 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-21 Phase-aware GUI elapsed timer
+
+- Exact implementation candidate `1acb501` preserves the activity/report
+  segment start across Home, setup, and Pause while stamping a separate
+  `battle_started_at` on the first genuine battle start. The native status cell
+  therefore shows **Activity Elapsed** between runs, switches to **Run
+  Elapsed**, and resets its visible clock at the actual start without losing
+  the earlier boundary needed for overall wall-clock analysis.
+- Server revision 54 advertises `current_run_phase_timing_v1`, and the matching
+  client requires it. The phase clock is presentation/report metadata only;
+  whole-run and recent CPH remain derived from validated game
+  `real_time_seconds` rather than either activity timestamp.
+- Focused coverage passed 321 Python tests and all 244 portable .NET tests. The
+  Release WindowsDesktop cross-build passed with only the established
+  read-only NuGet vulnerability-cache `NU1900` warnings. The runtime-input
+  complete checkpoint for exact candidate `1acb501` passed compilation,
+  state-definition validation, clickmap integrity with zero errors and the
+  established 44 orphan notices, and all 3,132 tests in 632.18 seconds using
+  development-environment fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+
 ### 2026-08-20 Cell reserve and Lab Speedup planner
 
 - Exact implementation candidate `8fe3c90` makes the Cell reserve floor
