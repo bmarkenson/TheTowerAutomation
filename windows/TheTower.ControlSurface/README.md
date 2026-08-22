@@ -366,16 +366,20 @@ status field and guarded runtime directive own it.
 A fourth status row is account-scoped rather than battle-scoped. **Cell
 Balance** shows the latest exact-version save total, **Cell Net Trend** shows
 the comparable net change over 24 hours (or over the shorter retained start),
-and **Cell Buffer** shows reserve headroom. The Lab Speedup planner below the
-run controls edits that reserve live and can record normal and reserve targets
+**Cell Buffer** shows reserve headroom, and **Lab Speedup Plan** compactly shows
+the five configured normal targets and their projected net Cell flow. The full
+planner opens from **Tools > Lab Speedup planner…** instead of occupying the
+Overview. It edits the reserve live and can record normal and reserve targets
 for each of five Labs. The reserve can be saved before those optional pairs are
-complete. Once all five are set, it shows exact per-Lab Cell cost, savings, a
-duration-weighted gross rate from up to 20 completed battles, and projected net
-flow for both plans. `1x` means no renewal. A falling trend, breached reserve,
-or reserve plan that still declines uses warning color. The account row can
-remain visible outside an active battle while fresh runtime status is
-available. Neither it nor the planner polls a save, opens Labs, buys or queues
-a boost, or changes an active speedup; automatic application remains disabled.
+complete. Once all five are set, the planner shows exact per-Lab Cell cost,
+savings, a duration-weighted gross rate from up to 20 completed battles, and
+projected net flow for both plans. `1x` means no renewal. A falling trend,
+breached reserve, or reserve plan that still declines uses warning color. The
+account row can remain visible outside an active battle while fresh runtime
+status is available. The configured targets are a saved plan, not a claim
+about active Lab speeds. Neither the row nor the planner polls a save, opens
+Labs, buys or queues a boost, or changes an active speedup; automatic
+application remains disabled.
 
 The application header keeps four different health signals visible: the fixed
 Linux API service's systemd state, HTTP reachability, the Windows-local API SSH
@@ -1293,7 +1297,12 @@ already configured:
    Attach is disabled while the visible selection is dirty or its request is in
    flight, then enabled after exact acknowledgement.
 11. At minimum, default, and maximized window sizes, confirm the four header
-    health indicators remain on one row. Expand Host Health and verify all
+    health indicators remain on one row and the four account items—Cell
+    Balance, Cell Net Trend, Cell Buffer, and Lab Speedup Plan—remain readable.
+    Confirm Overview has no full planner card. Open **Tools > Lab Speedup
+    planner…** twice and verify the existing window is activated rather than
+    duplicated; edit a draft while status polling continues, then save it and
+    confirm the compact plan summary updates. Expand Host Health and verify all
     three telemetry rows precede the two-column runtime evidence without being
     clipped. Exercise Timed Pause collapsed and expanded, then inspect a
     disabled state; its label and chevron must remain light on dark chrome with

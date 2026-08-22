@@ -4488,6 +4488,18 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
         / "TheTower.ControlSurface"
         / "MainWindow.xaml.cs"
     ).read_text(encoding="utf-8")
+    native_planner_xaml = (
+        Path(__file__).parents[1]
+        / "windows"
+        / "TheTower.ControlSurface"
+        / "LabSpeedPlannerWindow.xaml"
+    ).read_text(encoding="utf-8")
+    native_planner_code = (
+        Path(__file__).parents[1]
+        / "windows"
+        / "TheTower.ControlSurface"
+        / "LabSpeedPlannerWindow.xaml.cs"
+    ).read_text(encoding="utf-8")
     native_models = (
         Path(__file__).parents[1]
         / "windows"
@@ -4548,13 +4560,21 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert 'x:Name="CellBalanceMetricPanel"' in native_xaml
     assert 'x:Name="CellTrendMetricPanel"' in native_xaml
     assert 'x:Name="CellBufferMetricPanel"' in native_xaml
+    assert 'x:Name="LabSpeedPlanMetricPanel"' in native_xaml
+    assert 'x:Name="LabSpeedPlanStatusText"' in native_xaml
     assert 'JsonPropertyName("cell_balance")' in native_models
     assert "CellBalancePresenter.Present(" in native_code
     assert '"lab_speed_reserve_planner_v1"' in native_compatibility
     assert "lab_speed_reserve_planner_v1" in CONTROL_SURFACE_CAPABILITIES
     assert 'id="cellPolicyForm"' in html
-    assert 'x:Name="CellReserveFloorTextBox"' in native_xaml
-    assert 'x:Name="Lab5ReserveSpeedBox"' in native_xaml
+    assert 'Header="Lab Speedup planner…"' in native_xaml
+    assert 'Text="LAB SPEEDUP PLANNER"' not in native_xaml
+    assert "_labSpeedPlannerWindow.Activate();" in native_code
+    assert "SaveLabSpeedPolicyAsync" in native_code
+    assert 'x:Name="CellReserveFloorTextBox"' in native_planner_xaml
+    assert 'x:Name="Lab5ReserveSpeedBox"' in native_planner_xaml
+    assert "Automatic application is disabled." in native_planner_xaml
+    assert "public void UpdateStatus(" in native_planner_code
     assert 'JsonPropertyName("lab_speed_plan")' in native_models
     assert "RenderLabSpeedPlan(status.LabSpeedPlan)" in native_code
     assert '"emulator_host_selection_v1"' in native_compatibility

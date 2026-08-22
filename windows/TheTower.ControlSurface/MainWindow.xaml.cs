@@ -49,6 +49,7 @@ public partial class MainWindow : Window
     };
     private BattleListResponse _latestBattles = new();
     private BattleHistoryWindow? _battleHistoryWindow;
+    private LabSpeedPlannerWindow? _labSpeedPlannerWindow;
     private WorkflowGuidesWindow? _workflowGuidesWindow;
     private CancellationTokenSource? _refreshCancellation;
     private CancellationTokenSource? _battleRefreshCancellation;
@@ -72,12 +73,6 @@ public partial class MainWindow : Window
     private double _gameSpeedTarget = 6.3;
     private bool _updatingGameSpeedTargetSelection;
     private bool _gameSpeedTargetRequestInFlight;
-    private bool _labSpeedPlannerInitialized;
-    private bool _updatingCellPolicyDraft;
-    private bool _cellPolicyDraftDirty;
-    private bool _cellPolicyLoaded;
-    private bool _cellPolicyRequestInFlight;
-    private string? _cellPolicyRequestId;
     private LabSpeedPlanStatus? _latestLabSpeedPlan;
     private ControlSurfaceCompatibilityResult? _serverCompatibility;
     private LinuxApiServiceSnapshot? _controlSurfaceServiceState;
@@ -125,7 +120,6 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        InitializeLabSpeedPlanner();
         ActivityGrid.ItemsSource = _activity;
         CurrentPerksGrid.ItemsSource = _currentBattlePerks;
 
@@ -193,6 +187,7 @@ public partial class MainWindow : Window
             _activityRefreshCancellation?.Cancel();
             _serviceStatusCancellation?.Cancel();
             _battleHistoryWindow?.Close();
+            _labSpeedPlannerWindow?.Close();
             _workflowGuidesWindow?.Close();
             await _tunnelHost.DisposeAsync();
             _hostPerformance.SnapshotUpdated -= HostPerformance_SnapshotUpdated;
@@ -1980,357 +1975,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private sealed record LabPolicyDraftItem(
-        int Lab,
-        string? NormalSpeed,
-        string? ReserveSpeed);
-
-    private IReadOnlyList<(
-        int Lab,
-        ComboBox Normal,
-        ComboBox Reserve,
-        TextBlock NormalCost,
-        TextBlock ReserveCost,
-        TextBlock Savings)> LabPolicyRows() =>
-    [
-        (1, Lab1NormalSpeedBox, Lab1ReserveSpeedBox, Lab1NormalCostText, Lab1ReserveCostText, Lab1SavingsText),
-        (2, Lab2NormalSpeedBox, Lab2ReserveSpeedBox, Lab2NormalCostText, Lab2ReserveCostText, Lab2SavingsText),
-        (3, Lab3NormalSpeedBox, Lab3ReserveSpeedBox, Lab3NormalCostText, Lab3ReserveCostText, Lab3SavingsText),
-        (4, Lab4NormalSpeedBox, Lab4ReserveSpeedBox, Lab4NormalCostText, Lab4ReserveCostText, Lab4SavingsText),
-        (5, Lab5NormalSpeedBox, Lab5ReserveSpeedBox, Lab5NormalCostText, Lab5ReserveCostText, Lab5SavingsText),
-    ];
-
-    private void InitializeLabSpeedPlanner()
-    {
-        _updatingCellPolicyDraft = true;
-        try
-        {
-            string[] speeds = ["1", "1.5", "2", "3", "4", "5", "6", "7", "8"];
-            foreach (var row in LabPolicyRows())
-            {
-                foreach (var box in new[] { row.Normal, row.Reserve })
-                {
-                    foreach (var speed in speeds)
-                    {
-                        box.Items.Add(new ComboBoxItem
-                        {
-                            Tag = speed,
-                            Content = speed == "1"
-                                ? "1x — no renewal"
-                                : speed + "x",
-                        });
-                    }
-                    box.SelectedIndex = -1;
-                }
-            }
-        }
-        finally
-        {
-            _updatingCellPolicyDraft = false;
-            _labSpeedPlannerInitialized = true;
-        }
-    }
-
-    private static string? SelectedLabSpeed(ComboBox box) =>
-        (box.SelectedItem as ComboBoxItem)?.Tag?.ToString();
-
-    private static void SelectLabSpeed(ComboBox box, string? speed)
-    {
-        box.SelectedItem = box.Items
-            .OfType<ComboBoxItem>()
-            .FirstOrDefault(item => string.Equals(
-                item.Tag?.ToString(),
-                speed,
-                StringComparison.Ordinal));
-    }
-
-    private void LoadCellPolicyDraft(CellBalancePolicyStatus policy)
-    {
-        _updatingCellPolicyDraft = true;
-        try
-        {
-            CellReserveFloorTextBox.Text = policy.BufferFloorDecimal ?? "";
-            var labs = policy.Labs.ToDictionary(item => item.Lab);
-            foreach (var row in LabPolicyRows())
-            {
-                labs.TryGetValue(row.Lab, out var item);
-                SelectLabSpeed(row.Normal, item?.NormalSpeed);
-                SelectLabSpeed(row.Reserve, item?.ReserveSpeed);
-            }
-            _cellPolicyRequestId = policy.RequestId;
-            _cellPolicyLoaded = true;
-        }
-        finally
-        {
-            _updatingCellPolicyDraft = false;
-        }
-    }
-
-    private bool TryCellPolicyDraft(
-        out string? floor,
-        out List<LabPolicyDraftItem> labs)
-    {
-        floor = CellReserveFloorTextBox.Text.Trim();
-        if (floor.Length == 0)
-        {
-            floor = null;
-        }
-        else if (floor.Length > 36 || !floor.All(char.IsAsciiDigit))
-        {
-            labs = [];
-            return false;
-        }
-        labs = [];
-        foreach (var row in LabPolicyRows())
-        {
-            var normal = SelectedLabSpeed(row.Normal);
-            var reserve = SelectedLabSpeed(row.Reserve);
-            if (normal is null || reserve is null)
-            {
-                if (normal is not null || reserve is not null)
-                {
-                    labs = [];
-                    return false;
-                }
-                labs.Add(new LabPolicyDraftItem(row.Lab, null, null));
-                continue;
-            }
-            if (!double.TryParse(
-                    normal,
-                    NumberStyles.AllowDecimalPoint,
-                    CultureInfo.InvariantCulture,
-                    out var normalValue)
-                || !double.TryParse(
-                    reserve,
-                    NumberStyles.AllowDecimalPoint,
-                    CultureInfo.InvariantCulture,
-                    out var reserveValue)
-                || reserveValue > normalValue)
-            {
-                labs = [];
-                return false;
-            }
-            labs.Add(new LabPolicyDraftItem(row.Lab, normal, reserve));
-        }
-        return labs.Count == 5;
-    }
-
-    private bool TryLabCost(string? speed, out double cost)
-    {
-        cost = 0;
-        return speed is not null
-            && _latestLabSpeedPlan?.CostModel.CellsPerHourBySpeed.TryGetValue(
-                speed,
-                out var text) == true
-            && double.TryParse(
-                text,
-                NumberStyles.AllowDecimalPoint,
-                CultureInfo.InvariantCulture,
-                out cost)
-            && double.IsFinite(cost)
-            && cost >= 0;
-    }
-
-    private static string LabCostLabel(double value) =>
-        LabSpeedPlanPresenter.Compact(value) + "/h";
-
-    private void RenderCellPolicyDraft()
-    {
-        if (_latestLabSpeedPlan is null)
-        {
-            SaveCellPolicyButton.IsEnabled = false;
-            return;
-        }
-        var valid = TryCellPolicyDraft(out _, out var labs);
-        var planComplete = valid && labs.All(
-            item => item.NormalSpeed is not null && item.ReserveSpeed is not null);
-        var normalBurn = 0d;
-        var reserveBurn = 0d;
-        foreach (var row in LabPolicyRows())
-        {
-            var item = labs.FirstOrDefault(candidate => candidate.Lab == row.Lab);
-            var normalCost = 0d;
-            var reserveCost = 0d;
-            var normalValid = item is not null
-                && TryLabCost(item.NormalSpeed, out normalCost);
-            var reserveValid = item is not null
-                && TryLabCost(item.ReserveSpeed, out reserveCost);
-            row.NormalCost.Text = normalValid ? LabCostLabel(normalCost) : "-";
-            row.ReserveCost.Text = reserveValid ? LabCostLabel(reserveCost) : "-";
-            row.Savings.Text = normalValid && reserveValid
-                ? LabCostLabel(normalCost - reserveCost)
-                : "-";
-            if (normalValid)
-            {
-                normalBurn += normalCost;
-            }
-            if (reserveValid)
-            {
-                reserveBurn += reserveCost;
-            }
-        }
-        var historicalAvailable = double.TryParse(
-            _latestLabSpeedPlan.Income.CellsPerHourDecimal,
-            NumberStyles.AllowDecimalPoint,
-            CultureInfo.InvariantCulture,
-            out var historicalGross)
-            && double.IsFinite(historicalGross)
-            && historicalGross >= 0;
-        var actualNetAvailable = double.TryParse(
-            _latestLabSpeedPlan.ActualBalanceNetPerHourDecimal,
-            NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint,
-            CultureInfo.InvariantCulture,
-            out var actualNet)
-            && double.IsFinite(actualNet);
-        if (!valid)
-        {
-            LabRecommendationText.Text = "For each Lab, choose both targets or leave both blank; keep reserve at or below normal and enter a whole-number Cell reserve.";
-            LabRecommendationText.Foreground = new SolidColorBrush(
-                Color.FromRgb(241, 191, 91));
-        }
-        else if (!planComplete)
-        {
-            LabNormalProjectionText.Text = "Choose all Labs";
-            LabReserveProjectionText.Text = "Choose all Labs";
-            LabRecommendationText.Text = "The Cell reserve can be saved now. Complete both targets for all five Labs to add the spending forecast.";
-            LabRecommendationText.Foreground = new SolidColorBrush(
-                Color.FromRgb(98, 213, 255));
-        }
-        else
-        {
-            LabNormalProjectionText.Text = LabCostLabel(normalBurn) + " burn · "
-                + (historicalAvailable
-                    ? LabSpeedPlanPresenter.SignedCompact(
-                        historicalGross - normalBurn) + "/h net"
-                    : "net pending");
-            LabReserveProjectionText.Text = LabCostLabel(reserveBurn) + " burn · "
-                + (historicalAvailable
-                    ? LabSpeedPlanPresenter.SignedCompact(
-                        historicalGross - reserveBurn) + "/h net"
-                    : "net pending");
-            if (!historicalAvailable)
-            {
-                LabRecommendationText.Text = "The draft is complete; a projected net will appear when completed-battle Cell history is available.";
-                LabRecommendationText.Foreground = new SolidColorBrush(
-                    Color.FromRgb(98, 213, 255));
-            }
-            else if (historicalGross - reserveBurn < 0)
-            {
-                LabRecommendationText.Text = "Draft reserve targets still spend faster than historical gross Cell income.";
-                LabRecommendationText.Foreground = new SolidColorBrush(
-                    Color.FromRgb(241, 191, 91));
-            }
-            else if (historicalGross - normalBurn >= 0
-                && actualNetAvailable
-                && actualNet < 0)
-            {
-                LabRecommendationText.Text = "Historical income covers the draft normal plan, but the observed Cell balance is currently falling.";
-                LabRecommendationText.Foreground = new SolidColorBrush(
-                    Color.FromRgb(241, 191, 91));
-            }
-            else if (actualNetAvailable && actualNet < 0)
-            {
-                LabRecommendationText.Text = "The observed Cell balance is falling; the draft reserve targets are projected to make Cell flow nonnegative.";
-                LabRecommendationText.Foreground = new SolidColorBrush(
-                    Color.FromRgb(241, 191, 91));
-            }
-            else if (historicalGross - normalBurn >= 0)
-            {
-                LabRecommendationText.Text = "Draft normal targets are covered by historical gross Cell income.";
-                LabRecommendationText.Foreground = new SolidColorBrush(
-                    Color.FromRgb(101, 230, 166));
-            }
-            else if (historicalGross - reserveBurn >= 0)
-            {
-                LabRecommendationText.Text = "Draft reserve targets change projected Cell flow from declining to nonnegative.";
-                LabRecommendationText.Foreground = new SolidColorBrush(
-                    Color.FromRgb(101, 230, 166));
-            }
-        }
-        SaveCellPolicyButton.IsEnabled = valid
-            && !_cellPolicyRequestInFlight
-            && _serverCompatibility?.IsCompatible == true;
-        CellPolicyStatusText.Text = "Unsaved changes · planner only";
-    }
-
-    private void CellPolicyDraft_Changed(object sender, RoutedEventArgs e)
-    {
-        if (!_labSpeedPlannerInitialized || _updatingCellPolicyDraft)
-        {
-            return;
-        }
-        _cellPolicyDraftDirty = true;
-        RenderCellPolicyDraft();
-    }
-
-    private async void SaveCellPolicy_Click(object sender, RoutedEventArgs e)
-    {
-        if (!TryCellPolicyDraft(out var floor, out var labs))
-        {
-            ShowError(new InvalidOperationException(
-                "For each Lab, choose both targets or leave both blank, keep "
-                + "reserve no higher than normal, and enter a nonnegative "
-                + "whole-number Cell reserve."));
-            return;
-        }
-        var enteredControlGate = false;
-        var enteredRefreshGate = false;
-        Exception? requestFailure = null;
-        try
-        {
-            _cellPolicyRequestInFlight = true;
-            SaveCellPolicyButton.IsEnabled = false;
-            await _controlMutationGate.WaitAsync();
-            enteredControlGate = true;
-            _refreshCancellation?.Cancel();
-            var response = await _api.PostControlAsync(
-                new
-                {
-                    action = "cell_balance_policy",
-                    buffer_floor_decimal = floor,
-                    labs = labs.Select(item => new
-                    {
-                        lab = item.Lab,
-                        normal_speed = item.NormalSpeed,
-                        reserve_speed = item.ReserveSpeed,
-                    }).ToArray(),
-                },
-                CancellationToken.None);
-            await _refreshGate.WaitAsync();
-            enteredRefreshGate = true;
-            _cellPolicyDraftDirty = false;
-            _cellPolicyLoaded = false;
-            RenderStatus(response);
-        }
-        catch (Exception exc)
-        {
-            requestFailure = exc;
-        }
-        finally
-        {
-            _cellPolicyRequestInFlight = false;
-            if (enteredRefreshGate)
-            {
-                _refreshGate.Release();
-            }
-            if (enteredControlGate)
-            {
-                _controlMutationGate.Release();
-            }
-            if (_cellPolicyDraftDirty)
-            {
-                RenderCellPolicyDraft();
-            }
-        }
-        if (requestFailure is not null)
-        {
-            await RefreshStatusAsync(force: true);
-            ShowError(requestFailure);
-            return;
-        }
-        await RefreshActivityAsync(force: true);
-    }
-
     private async void Mode_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not Button button || button.Tag is not string mode)
@@ -3072,6 +2716,7 @@ public partial class MainWindow : Window
             ClearBattleScreenMetrics();
             ClearActiveRunMetrics();
             ClearCellBalance();
+            ClearLabSpeedPlan();
             SetHttpConnectionStatus(
                 serviceState.ActiveState == "failed"
                     ? "Unavailable — service failed"
@@ -3119,6 +2764,7 @@ public partial class MainWindow : Window
             ClearBattleScreenMetrics();
             ClearActiveRunMetrics();
             ClearCellBalance();
+            ClearLabSpeedPlan();
             if (!force)
             {
                 SetHttpConnectionStatus(
@@ -3131,6 +2777,7 @@ public partial class MainWindow : Window
             ClearBattleScreenMetrics();
             ClearActiveRunMetrics();
             ClearCellBalance();
+            ClearLabSpeedPlan();
             var serviceStopped = _controlSurfaceServiceState is
                 { IsActive: false, ActiveState: "inactive" };
             SetHttpConnectionStatus(
@@ -5140,6 +4787,98 @@ public partial class MainWindow : Window
         }
     }
 
+    private void OpenLabSpeedPlanner_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            if (_labSpeedPlannerWindow is not null)
+            {
+                if (_labSpeedPlannerWindow.WindowState == WindowState.Minimized)
+                {
+                    _labSpeedPlannerWindow.WindowState = WindowState.Normal;
+                }
+                _labSpeedPlannerWindow.Activate();
+                return;
+            }
+
+            var plannerWindow = new LabSpeedPlannerWindow(
+                SaveLabSpeedPolicyAsync)
+            {
+                Owner = this,
+            };
+            plannerWindow.UpdateStatus(
+                _latestLabSpeedPlan,
+                _serverCompatibility?.IsCompatible == true);
+            plannerWindow.Closed += (_, _) => _labSpeedPlannerWindow = null;
+            _labSpeedPlannerWindow = plannerWindow;
+            plannerWindow.Show();
+        }
+        catch (Exception exc)
+        {
+            _labSpeedPlannerWindow = null;
+            ShowError(new InvalidOperationException(
+                $"Unable to open the Lab Speedup planner: {exc.Message}",
+                exc));
+        }
+    }
+
+    private async Task<StatusResponse> SaveLabSpeedPolicyAsync(
+        string? floor,
+        IReadOnlyList<LabPolicyDraftItem> labs)
+    {
+        var enteredControlGate = false;
+        var enteredRefreshGate = false;
+        StatusResponse? response = null;
+        Exception? requestFailure = null;
+        try
+        {
+            await _controlMutationGate.WaitAsync();
+            enteredControlGate = true;
+            _refreshCancellation?.Cancel();
+            response = await _api.PostControlAsync(
+                new
+                {
+                    action = "cell_balance_policy",
+                    buffer_floor_decimal = floor,
+                    labs = labs.Select(item => new
+                    {
+                        lab = item.Lab,
+                        normal_speed = item.NormalSpeed,
+                        reserve_speed = item.ReserveSpeed,
+                    }).ToArray(),
+                },
+                CancellationToken.None);
+            await _refreshGate.WaitAsync();
+            enteredRefreshGate = true;
+            RenderStatus(response);
+        }
+        catch (Exception exc)
+        {
+            requestFailure = exc;
+        }
+        finally
+        {
+            if (enteredRefreshGate)
+            {
+                _refreshGate.Release();
+            }
+            if (enteredControlGate)
+            {
+                _controlMutationGate.Release();
+            }
+        }
+
+        if (requestFailure is not null)
+        {
+            await RefreshStatusAsync(force: true);
+            throw requestFailure;
+        }
+
+        await RefreshActivityAsync(force: true);
+        return response ?? throw new InvalidOperationException(
+            "The Lab Speedup policy response was unavailable.");
+    }
+
     private static string Join(IEnumerable<string>? values) =>
         values is null || !values.Any() ? "-" : string.Join(", ", values);
 
@@ -5791,91 +5530,27 @@ public partial class MainWindow : Window
     private void ClearCellBalance() =>
         RenderCellBalance(CellBalancePresenter.Present(null));
 
+    private void ClearLabSpeedPlan() => RenderLabSpeedPlan(null);
+
     private void RenderLabSpeedPlan(LabSpeedPlanStatus? status)
     {
         _latestLabSpeedPlan = status;
         var presentation = LabSpeedPlanPresenter.Present(status);
-        if (!presentation.Visible || status is null)
-        {
-            LabPlannerBadgeText.Text = "UNAVAILABLE";
-            LabPlannerBadgeText.Foreground = new SolidColorBrush(
-                Color.FromRgb(255, 113, 135));
-            LabHistoricalGrossText.Text = "-";
-            LabActualNetText.Text = "-";
-            LabNormalProjectionText.Text = "-";
-            LabReserveProjectionText.Text = "-";
-            LabRecommendationText.Text = "A compatible Linux Lab planner status is unavailable.";
-            SaveCellPolicyButton.IsEnabled = false;
-            return;
-        }
-        if (!_cellPolicyDraftDirty
-            && (!_cellPolicyLoaded
-                || !string.Equals(
-                    _cellPolicyRequestId,
-                    status.Policy.RequestId,
-                    StringComparison.Ordinal)))
-        {
-            LoadCellPolicyDraft(status.Policy);
-        }
-        LabPlannerBadgeText.Text = presentation.Badge.ToUpperInvariant();
-        LabPlannerBadgeText.Foreground = presentation.Warning
+        LabSpeedPlanStatusText.Text = presentation.StatusSummary;
+        LabSpeedPlanStatusText.Foreground = presentation.Warning
             ? new SolidColorBrush(Color.FromRgb(241, 191, 91))
-            : new SolidColorBrush(Color.FromRgb(101, 230, 166));
-        LabHistoricalGrossText.Text = presentation.HistoricalGross;
-        LabActualNetText.Text = presentation.ActualNet;
-        LabActualNetText.Foreground = presentation.ActualNet.StartsWith(
-            "-",
-            StringComparison.Ordinal)
-            ? new SolidColorBrush(Color.FromRgb(241, 191, 91))
-            : Brushes.White;
-        LabNormalProjectionText.Text = presentation.NormalProjection;
-        LabReserveProjectionText.Text = presentation.ReserveProjection;
-        LabRecommendationText.Text = presentation.Recommendation;
-        LabRecommendationText.Foreground = presentation.Warning
-            ? new SolidColorBrush(Color.FromRgb(241, 191, 91))
-            : string.Equals(
-                status.Recommendation.Status,
-                "policy_incomplete",
-                StringComparison.Ordinal)
-                || string.Equals(
-                    status.Recommendation.Status,
-                    "income_history_unavailable",
-                    StringComparison.Ordinal)
-                ? new SolidColorBrush(Color.FromRgb(98, 213, 255))
-                : new SolidColorBrush(Color.FromRgb(101, 230, 166));
-        LabRecommendationBorder.ToolTip = presentation.Detail;
-        var policyItems = status.Policy.Labs.ToDictionary(item => item.Lab);
-        foreach (var row in LabPolicyRows())
-        {
-            policyItems.TryGetValue(row.Lab, out var item);
-            row.NormalCost.Text = LabPolicyCost(item?.NormalCellsPerHourDecimal);
-            row.ReserveCost.Text = LabPolicyCost(item?.ReserveCellsPerHourDecimal);
-            row.Savings.Text = LabPolicyCost(item?.SavingsPerHourDecimal);
-        }
-        CellPolicyStatusText.Text = DateTimeOffset.TryParse(
-            status.Policy.UpdatedAt,
-            CultureInfo.InvariantCulture,
-            DateTimeStyles.RoundtripKind,
-            out var updatedAt)
-            ? $"Saved {updatedAt.LocalDateTime:g} · automatic application disabled"
-            : "No Lab plan saved yet · automatic application disabled";
-        SaveCellPolicyButton.IsEnabled = false;
-        if (_cellPolicyDraftDirty)
-        {
-            RenderCellPolicyDraft();
-        }
+            : Foreground;
+        LabSpeedPlanMetricPanel.ToolTip = presentation.Visible
+            ? presentation.Recommendation + " " + presentation.Detail
+                + " Open Tools → Lab Speedup planner… to review or edit."
+            : "A compatible Linux Lab planner status is unavailable.";
+        LabSpeedPlanMetricPanel.Visibility = presentation.Visible
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        _labSpeedPlannerWindow?.UpdateStatus(
+            status,
+            _serverCompatibility?.IsCompatible == true);
     }
-
-    private static string LabPolicyCost(string? value) =>
-        double.TryParse(
-            value,
-            NumberStyles.AllowDecimalPoint,
-            CultureInfo.InvariantCulture,
-            out var cost)
-            && double.IsFinite(cost)
-            && cost >= 0
-            ? LabCostLabel(cost)
-            : "-";
 
     private static string FormatPercent(double? value) =>
         value is null

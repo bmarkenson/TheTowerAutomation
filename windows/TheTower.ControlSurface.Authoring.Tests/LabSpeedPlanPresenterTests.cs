@@ -15,6 +15,9 @@ public sealed class LabSpeedPlanPresenterTests
         Assert.Equal("-15K/h", presentation.ActualNet);
         Assert.Equal("251.9K/h burn · -51.9K/h net", presentation.NormalProjection);
         Assert.Equal("59.5K/h burn · +140.5K/h net", presentation.ReserveProjection);
+        Assert.Equal(
+            "Normal 6x/6x/6x/6x/5x · -51.9K/h net",
+            presentation.StatusSummary);
         Assert.False(presentation.Warning);
         Assert.Contains("automatic application is disabled", presentation.Detail);
         Assert.False(status.AutomaticApplicationEnabled);
@@ -62,6 +65,24 @@ public sealed class LabSpeedPlanPresenterTests
         };
 
         Assert.True(LabSpeedPlanPresenter.Present(status).Warning);
+    }
+
+    [Fact]
+    public void SummarizesIncompleteAndInvalidPoliciesWithoutInventingTargets()
+    {
+        var incomplete = Ready();
+        incomplete.Status = "incomplete";
+        incomplete.Policy.Labs[4].NormalSpeed = null;
+        incomplete.NormalPlan.Complete = false;
+        Assert.Equal(
+            "Plan incomplete",
+            LabSpeedPlanPresenter.Present(incomplete).StatusSummary);
+
+        var invalid = Ready();
+        invalid.Status = "invalid_policy";
+        Assert.Equal(
+            "Policy invalid",
+            LabSpeedPlanPresenter.Present(invalid).StatusSummary);
     }
 
     [Fact]

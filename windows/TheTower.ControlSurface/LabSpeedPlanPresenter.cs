@@ -6,6 +6,7 @@ internal sealed record LabSpeedPlanPresentation(
     bool Visible,
     string Badge,
     bool Warning,
+    string StatusSummary,
     string HistoricalGross,
     string ActualNet,
     string NormalProjection,
@@ -23,7 +24,7 @@ internal static class LabSpeedPlanPresenter
     ];
 
     private static readonly LabSpeedPlanPresentation Hidden = new(
-        false, "Unavailable", true, "-", "-", "-", "-", "", "");
+        false, "Unavailable", true, "", "-", "-", "-", "-", "", "");
 
     public static LabSpeedPlanPresentation Present(LabSpeedPlanStatus? status)
     {
@@ -66,6 +67,24 @@ internal static class LabSpeedPlanPresenter
                 or "reserve_floor_breached"
                 or "observed_decline_despite_forecast"
                 or "observed_decline_reserve_plan_recovers";
+        var configuredNormalSpeeds = Enumerable.Range(1, 5)
+            .Select(lab => status.Policy.Labs
+                .FirstOrDefault(item => item.Lab == lab)
+                ?.NormalSpeed)
+            .ToArray();
+        var statusSummary = state == "invalid_policy"
+            ? "Policy invalid"
+            : configuredNormalSpeeds.All(
+                speed => !string.IsNullOrWhiteSpace(speed))
+                ? "Normal " + string.Join(
+                    "/",
+                    configuredNormalSpeeds.Select(speed => speed + "x"))
+                    + (Number(
+                        status.NormalPlan.ProjectedNetPerHourDecimal,
+                        signed: true) is double normalNet
+                        ? " · " + SignedCompact(normalNet) + "/h net"
+                        : "")
+                : "Plan incomplete";
         var detail = "Completed-battle income is duration weighted. 1x means no "
             + "renewal. Active boosts continue to expiry; automatic application "
             + "is disabled.";
@@ -78,6 +97,7 @@ internal static class LabSpeedPlanPresenter
                 _ => "Plan incomplete",
             },
             warning,
+            statusSummary,
             historical,
             actual,
             normal,

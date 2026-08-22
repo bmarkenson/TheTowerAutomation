@@ -1,0 +1,175 @@
+<Window x:Class="TheTower.ControlSurface.LabSpeedPlannerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Lab Speedup planner"
+        Width="1050" Height="720" MinWidth="900" MinHeight="600"
+        WindowStartupLocation="CenterOwner"
+        Background="#0A0E16" Foreground="#EDF2F7"
+        ShowInTaskbar="False">
+  <Grid Margin="18">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+
+    <StackPanel>
+      <TextBlock Text="Lab Speedup planner"
+                 FontSize="20"
+                 FontWeight="SemiBold" />
+      <TextBlock Text="Set the Cell reserve and normal and reserve targets for each Lab. The completed-battle forecast is planning evidence only; saving never opens Labs, buys a boost, or changes an active speedup."
+                 Foreground="{StaticResource MutedBrush}"
+                 TextWrapping="Wrap"
+                 Margin="0,5,0,0" />
+    </StackPanel>
+
+    <ScrollViewer Grid.Row="1"
+                  VerticalScrollBarVisibility="Auto"
+                  HorizontalScrollBarVisibility="Disabled"
+                  Margin="0,14,0,0">
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="1.55*" />
+          <ColumnDefinition Width="1*" />
+        </Grid.ColumnDefinitions>
+
+        <Border Grid.Column="0"
+                Style="{StaticResource DashboardCard}"
+                Margin="0,0,5,0">
+          <StackPanel>
+            <TextBlock Text="CELL RESERVE AND TARGETS"
+                       Foreground="#62D5FF"
+                       FontSize="10"
+                       FontWeight="Bold"
+                       Margin="4,0,4,7" />
+            <TextBlock Text="CELL RESERVE FLOOR"
+                       Foreground="{StaticResource MutedBrush}"
+                       FontSize="9"
+                       FontWeight="Bold"
+                       Margin="4,2,4,0" />
+            <TextBox x:Name="CellReserveFloorTextBox"
+                     TextChanged="CellPolicyDraft_Changed"
+                     ToolTip="A nonnegative whole number of Cells. Leave blank to clear the reserve warning."
+                     Margin="4" />
+            <Grid Margin="4,4,4,0">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="52" />
+                <ColumnDefinition Width="1*" />
+                <ColumnDefinition Width="1*" />
+                <ColumnDefinition Width=".8*" />
+                <ColumnDefinition Width=".8*" />
+                <ColumnDefinition Width=".8*" />
+              </Grid.ColumnDefinitions>
+              <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+              </Grid.RowDefinitions>
+              <TextBlock Grid.Row="0" Grid.Column="0" Text="LAB" Foreground="{StaticResource MutedBrush}" FontSize="9" />
+              <TextBlock Grid.Row="0" Grid.Column="1" Text="NORMAL" Foreground="{StaticResource MutedBrush}" FontSize="9" />
+              <TextBlock Grid.Row="0" Grid.Column="2" Text="RESERVE" Foreground="{StaticResource MutedBrush}" FontSize="9" />
+              <TextBlock Grid.Row="0" Grid.Column="3" Text="NORMAL / H" Foreground="{StaticResource MutedBrush}" FontSize="9" />
+              <TextBlock Grid.Row="0" Grid.Column="4" Text="RESERVE / H" Foreground="{StaticResource MutedBrush}" FontSize="9" />
+              <TextBlock Grid.Row="0" Grid.Column="5" Text="SAVE / H" Foreground="{StaticResource MutedBrush}" FontSize="9" />
+
+              <TextBlock Grid.Row="1" Grid.Column="0" Text="Lab 1" VerticalAlignment="Center" />
+              <ComboBox Grid.Row="1" Grid.Column="1" x:Name="Lab1NormalSpeedBox" SelectionChanged="CellPolicyDraft_Changed" Margin="2" />
+              <ComboBox Grid.Row="1" Grid.Column="2" x:Name="Lab1ReserveSpeedBox" SelectionChanged="CellPolicyDraft_Changed" Margin="2" />
+              <TextBlock Grid.Row="1" Grid.Column="3" x:Name="Lab1NormalCostText" Text="-" VerticalAlignment="Center" />
+              <TextBlock Grid.Row="1" Grid.Column="4" x:Name="Lab1ReserveCostText" Text="-" VerticalAlignment="Center" />
+              <TextBlock Grid.Row="1" Grid.Column="5" x:Name="Lab1SavingsText" Text="-" VerticalAlignment="Center" />
+
+              <TextBlock Grid.Row="2" Grid.Column="0" Text="Lab 2" VerticalAlignment="Center" />
+              <ComboBox Grid.Row="2" Grid.Column="1" x:Name="Lab2NormalSpeedBox" SelectionChanged="CellPolicyDraft_Changed" Margin="2" />
+              <ComboBox Grid.Row="2" Grid.Column="2" x:Name="Lab2ReserveSpeedBox" SelectionChanged="CellPolicyDraft_Changed" Margin="2" />
+              <TextBlock Grid.Row="2" Grid.Column="3" x:Name="Lab2NormalCostText" Text="-" VerticalAlignment="Center" />
+              <TextBlock Grid.Row="2" Grid.Column="4" x:Name="Lab2ReserveCostText" Text="-" VerticalAlignment="Center" />
+              <TextBlock Grid.Row="2" Grid.Column="5" x:Name="Lab2SavingsText" Text="-" VerticalAlignment="Center" />
+
+              <TextBlock Grid.Row="3" Grid.Column="0" Text="Lab 3" VerticalAlignment="Center" />
+              <ComboBox Grid.Row="3" Grid.Column="1" x:Name="Lab3NormalSpeedBox" SelectionChanged="CellPolicyDraft_Changed" Margin="2" />
+              <ComboBox Grid.Row="3" Grid.Column="2" x:Name="Lab3ReserveSpeedBox" SelectionChanged="CellPolicyDraft_Changed" Margin="2" />
+              <TextBlock Grid.Row="3" Grid.Column="3" x:Name="Lab3NormalCostText" Text="-" VerticalAlignment="Center" />
+              <TextBlock Grid.Row="3" Grid.Column="4" x:Name="Lab3ReserveCostText" Text="-" VerticalAlignment="Center" />
+              <TextBlock Grid.Row="3" Grid.Column="5" x:Name="Lab3SavingsText" Text="-" VerticalAlignment="Center" />
+
+              <TextBlock Grid.Row="4" Grid.Column="0" Text="Lab 4" VerticalAlignment="Center" />
+              <ComboBox Grid.Row="4" Grid.Column="1" x:Name="Lab4NormalSpeedBox" SelectionChanged="CellPolicyDraft_Changed" Margin="2" />
+              <ComboBox Grid.Row="4" Grid.Column="2" x:Name="Lab4ReserveSpeedBox" SelectionChanged="CellPolicyDraft_Changed" Margin="2" />
+              <TextBlock Grid.Row="4" Grid.Column="3" x:Name="Lab4NormalCostText" Text="-" VerticalAlignment="Center" />
+              <TextBlock Grid.Row="4" Grid.Column="4" x:Name="Lab4ReserveCostText" Text="-" VerticalAlignment="Center" />
+              <TextBlock Grid.Row="4" Grid.Column="5" x:Name="Lab4SavingsText" Text="-" VerticalAlignment="Center" />
+
+              <TextBlock Grid.Row="5" Grid.Column="0" Text="Lab 5" VerticalAlignment="Center" />
+              <ComboBox Grid.Row="5" Grid.Column="1" x:Name="Lab5NormalSpeedBox" SelectionChanged="CellPolicyDraft_Changed" Margin="2" />
+              <ComboBox Grid.Row="5" Grid.Column="2" x:Name="Lab5ReserveSpeedBox" SelectionChanged="CellPolicyDraft_Changed" Margin="2" />
+              <TextBlock Grid.Row="5" Grid.Column="3" x:Name="Lab5NormalCostText" Text="-" VerticalAlignment="Center" />
+              <TextBlock Grid.Row="5" Grid.Column="4" x:Name="Lab5ReserveCostText" Text="-" VerticalAlignment="Center" />
+              <TextBlock Grid.Row="5" Grid.Column="5" x:Name="Lab5SavingsText" Text="-" VerticalAlignment="Center" />
+            </Grid>
+            <Button x:Name="SaveCellPolicyButton"
+                    Content="Save reserve and Lab plan"
+                    Click="SaveCellPolicy_Click"
+                    Style="{StaticResource PrimaryButton}"
+                    IsEnabled="False"
+                    Margin="4,7,4,2" />
+            <TextBlock x:Name="CellPolicyStatusText"
+                       Text="Waiting for the saved policy."
+                       TextWrapping="Wrap"
+                       Foreground="{StaticResource MutedBrush}"
+                       FontSize="10"
+                       Margin="6,1,6,0" />
+          </StackPanel>
+        </Border>
+
+        <Border Grid.Column="1"
+                Style="{StaticResource DashboardCard}"
+                Margin="5,0,0,0">
+          <StackPanel>
+            <TextBlock x:Name="LabPlannerBadgeText"
+                       Text="LOADING"
+                       Foreground="{StaticResource MutedBrush}"
+                       FontSize="10"
+                       FontWeight="Bold"
+                       Margin="4,0,4,7" />
+            <TextBlock Text="HISTORICAL GROSS" Foreground="{StaticResource MutedBrush}" FontSize="9" />
+            <TextBlock x:Name="LabHistoricalGrossText" Text="-" FontSize="15" FontWeight="Bold" Margin="0,1,0,9" />
+            <TextBlock Text="OBSERVED BALANCE NET" Foreground="{StaticResource MutedBrush}" FontSize="9" />
+            <TextBlock x:Name="LabActualNetText" Text="-" FontSize="15" FontWeight="Bold" Margin="0,1,0,9" />
+            <TextBlock Text="NORMAL PLAN" Foreground="{StaticResource MutedBrush}" FontSize="9" />
+            <TextBlock x:Name="LabNormalProjectionText" Text="-" FontWeight="Bold" TextWrapping="Wrap" Margin="0,1,0,9" />
+            <TextBlock Text="RESERVE PLAN" Foreground="{StaticResource MutedBrush}" FontSize="9" />
+            <TextBlock x:Name="LabReserveProjectionText" Text="-" FontWeight="Bold" TextWrapping="Wrap" Margin="0,1,0,9" />
+            <Border x:Name="LabRecommendationBorder"
+                    BorderBrush="{StaticResource BorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="7"
+                    Padding="8"
+                    Margin="0,3,0,0">
+              <TextBlock x:Name="LabRecommendationText"
+                         Text="Complete all five Lab targets to calculate the plan."
+                         TextWrapping="Wrap" />
+            </Border>
+            <TextBlock Text="1x means no renewal. Active boosts continue to expiry. Automatic application is disabled."
+                       TextWrapping="Wrap"
+                       Foreground="{StaticResource MutedBrush}"
+                       FontSize="10"
+                       Margin="2,9,2,0" />
+          </StackPanel>
+        </Border>
+      </Grid>
+    </ScrollViewer>
+
+    <StackPanel Grid.Row="2"
+                Orientation="Horizontal"
+                HorizontalAlignment="Right"
+                Margin="0,14,0,0">
+      <Button Content="Close"
+              Click="Close_Click"
+              MinWidth="100" />
+    </StackPanel>
+  </Grid>
+</Window>
