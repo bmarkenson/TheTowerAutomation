@@ -21,6 +21,8 @@
              Link="ActiveRunMetricPresenter.cs" />
     <Compile Include="..\TheTower.ControlSurface\BattleScreenMetricPresenter.cs"
              Link="BattleScreenMetricPresenter.cs" />
+    <Compile Include="..\TheTower.ControlSurface\CellReserveInputParser.cs"
+             Link="CellReserveInputParser.cs" />
     <Compile Include="..\TheTower.ControlSurface\CellBalancePresenter.cs"
              Link="CellBalancePresenter.cs" />
     <Compile Include="..\TheTower.ControlSurface\LabSpeedPlanPresenter.cs"

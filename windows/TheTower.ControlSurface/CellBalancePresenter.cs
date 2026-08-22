@@ -181,23 +181,24 @@ internal static class CellBalancePresenter
         {
             return "Unavailable";
         }
-        if (!TryNumber(buffer.FloorDecimal, signed: false, out _)
+        if (!TryNumber(buffer.FloorDecimal, signed: false, out var floor)
             || !TryNumber(buffer.HeadroomDecimal, signed: true, out var headroom))
         {
             return null;
         }
+        var floorLabel = Compact(floor) + " floor · ";
         if (state == "above" && headroom > 0)
         {
-            return Compact(headroom) + " above";
+            return floorLabel + Compact(headroom) + " above";
         }
         if (state == "at" && headroom == 0)
         {
-            return "At floor";
+            return floorLabel + "at floor";
         }
         if (state == "below" && headroom < 0)
         {
             warning = true;
-            return Compact(Math.Abs(headroom)) + " below";
+            return floorLabel + Compact(Math.Abs(headroom)) + " below";
         }
         return null;
     }
@@ -207,13 +208,15 @@ internal static class CellBalancePresenter
         var state = (buffer.Status ?? "").Trim().ToLowerInvariant();
         if (state == "not_configured")
         {
-            return "No reserve floor is configured.";
+            return "No reserve warning floor is configured.";
         }
         if (!TryNumber(buffer.FloorDecimal, signed: false, out var floor))
         {
             return "Reserve state is unavailable.";
         }
-        var detail = $"Reserve floor: {Compact(floor)} Cells; state: {state}.";
+        var detail = $"Reserve warning floor: {Compact(floor)} Cells; state: "
+            + $"{state}. Cell Buffer is balance minus this floor; no Cells "
+            + "are set aside.";
         if (TryNumber(
             buffer.EstimatedHoursToFloorDecimal,
             signed: false,

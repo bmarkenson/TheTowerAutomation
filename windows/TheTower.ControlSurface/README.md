@@ -366,20 +366,27 @@ status field and guarded runtime directive own it.
 A fourth status row is account-scoped rather than battle-scoped. **Cell
 Balance** shows the latest exact-version save total, **Cell Net Trend** shows
 the comparable net change over 24 hours (or over the shorter retained start),
-**Cell Buffer** shows reserve headroom, and **Lab Speedup Plan** compactly shows
-the five configured normal targets and their projected net Cell flow. The full
+**Cell Buffer** shows the reserve floor and headroom, and **Lab Speedup Plan**
+compactly shows the five configured normal targets and their projected net
+Cell flow. The full
 planner opens from **Tools > Lab Speedup planner…** instead of occupying the
-Overview. It edits the reserve live and can record normal and reserve targets
-for each of five Labs. The reserve can be saved before those optional pairs are
-complete. Once all five are set, the planner shows exact per-Lab Cell cost,
-savings, a duration-weighted gross rate from up to 20 completed battles, and
-projected net flow for both plans. `1x` means no renewal. A falling trend,
-breached reserve, or reserve plan that still declines uses warning color. The
-account row can remain visible outside an active battle while fresh runtime
-status is available. The configured targets are a saved plan, not a claim
-about active Lab speeds. Neither the row nor the planner polls a save, opens
-Labs, buys or queues a boost, or changes an active speedup; automatic
-application remains disabled.
+Overview. It edits the reserve warning floor live and can record normal and
+reserve targets for each of five Labs. The native floor field accepts exact,
+grouped, or compact whole-Cell forms such as `20000000`, `20,000,000`, or
+`20M`, normalizing each to the same exact total. **Cell Buffer** shows both the
+configured floor and current balance-minus-floor headroom; crossing below it
+warns but does not reserve Cells or trigger a speed change. The reserve Lab
+targets are the alternate fallback forecast to consider in that state, not an
+automatically selected profile. The
+floor can be saved before those optional pairs are complete. Once all five are
+set, the planner shows exact per-Lab Cell cost, savings, a duration-weighted
+gross rate from up to 20 completed battles, and projected net flow for both
+plans. `1x` means no renewal. A falling trend, breached reserve, or reserve plan
+that still declines uses warning color. The account row can remain visible
+outside an active battle while fresh runtime status is available. The
+configured targets are a saved plan, not a claim about active Lab speeds.
+Neither the row nor the planner polls a save, opens Labs, buys or queues a
+boost, or changes an active speedup; automatic application remains disabled.
 
 The application header keeps four different health signals visible: the fixed
 Linux API service's systemd state, HTTP reachability, the Windows-local API SSH
@@ -1299,6 +1306,10 @@ already configured:
 11. At minimum, default, and maximized window sizes, confirm the four header
     health indicators remain on one row and the four account items—Cell
     Balance, Cell Net Trend, Cell Buffer, and Lab Speedup Plan—remain readable.
+    Confirm the first three align to status columns 1–3 and the Lab plan begins
+    at column 4 with the remaining width. In the planner, save `20M` and
+    `20,000,000` in turn and verify both become the same 20,000,000-Cell warning
+    floor and produce the same above/below headroom without changing a Lab.
     Confirm Overview has no full planner card. Open **Tools > Lab Speedup
     planner…** twice and verify the existing window is activated rather than
     duplicated; edit a draft while status polling continues, then save it and

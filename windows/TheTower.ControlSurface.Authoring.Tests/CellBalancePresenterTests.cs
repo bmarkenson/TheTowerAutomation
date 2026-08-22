@@ -17,10 +17,11 @@ public sealed class CellBalancePresenterTests
 
         Assert.Equal("25M", presentation.Total);
         Assert.Equal("↓ -500K / 24h", presentation.Trend);
-        Assert.Equal("5M above", presentation.Buffer);
+        Assert.Equal("20M floor · 5M above", presentation.Buffer);
         Assert.True(presentation.TrendFalling);
         Assert.False(presentation.BufferWarning);
         Assert.Contains("Comparable net change: -500K", presentation.Detail);
+        Assert.Contains("no Cells are set aside", presentation.Detail);
         Assert.Contains("structural observation only", presentation.Detail);
         Assert.Contains("automatic Lab Speedup reduction is disabled", presentation.Detail);
     }
@@ -40,7 +41,7 @@ public sealed class CellBalancePresenterTests
         var presentation = CellBalancePresenter.Present(status);
 
         Assert.Equal("↑ +100K / 2h", presentation.Trend);
-        Assert.Equal("250K below", presentation.Buffer);
+        Assert.Equal("20M floor · 250K below", presentation.Buffer);
         Assert.False(presentation.TrendFalling);
         Assert.True(presentation.BufferWarning);
         Assert.False(status.Buffer!.AutomaticReductionEnabled);

@@ -17,7 +17,7 @@
       <TextBlock Text="Lab Speedup planner"
                  FontSize="20"
                  FontWeight="SemiBold" />
-      <TextBlock Text="Set the Cell reserve and normal and reserve targets for each Lab. The completed-battle forecast is planning evidence only; saving never opens Labs, buys a boost, or changes an active speedup."
+      <TextBlock Text="Set the Cell warning floor and normal and reserve targets for each Lab. The completed-battle forecast is planning evidence only; saving never opens Labs, buys a boost, or changes an active speedup."
                  Foreground="{StaticResource MutedBrush}"
                  TextWrapping="Wrap"
                  Margin="0,5,0,0" />
@@ -42,15 +42,20 @@
                        FontSize="10"
                        FontWeight="Bold"
                        Margin="4,0,4,7" />
-            <TextBlock Text="CELL RESERVE FLOOR"
+            <TextBlock Text="CELL RESERVE FLOOR — WARNING ONLY"
                        Foreground="{StaticResource MutedBrush}"
                        FontSize="9"
                        FontWeight="Bold"
                        Margin="4,2,4,0" />
             <TextBox x:Name="CellReserveFloorTextBox"
                      TextChanged="CellPolicyDraft_Changed"
-                     ToolTip="A nonnegative whole number of Cells. Leave blank to clear the reserve warning."
+                     ToolTip="A nonnegative whole number of Cells. Compact and grouped forms such as 20M and 20,000,000 are accepted. Leave blank to clear the warning."
                      Margin="4" />
+            <TextBlock Text="Accepted examples: 20M, 20,000,000, or 20000000. Cell Buffer warns when the balance is below this floor; it does not change Lab speedups."
+                       Foreground="{StaticResource MutedBrush}"
+                       TextWrapping="Wrap"
+                       FontSize="10"
+                       Margin="6,0,6,5" />
             <Grid Margin="4,4,4,0">
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="52" />
@@ -69,8 +74,8 @@
                 <RowDefinition Height="Auto" />
               </Grid.RowDefinitions>
               <TextBlock Grid.Row="0" Grid.Column="0" Text="LAB" Foreground="{StaticResource MutedBrush}" FontSize="9" />
-              <TextBlock Grid.Row="0" Grid.Column="1" Text="NORMAL" Foreground="{StaticResource MutedBrush}" FontSize="9" />
-              <TextBlock Grid.Row="0" Grid.Column="2" Text="RESERVE" Foreground="{StaticResource MutedBrush}" FontSize="9" />
+              <TextBlock Grid.Row="0" Grid.Column="1" Text="NORMAL TARGET" Foreground="{StaticResource MutedBrush}" FontSize="9" />
+              <TextBlock Grid.Row="0" Grid.Column="2" Text="RESERVE TARGET" Foreground="{StaticResource MutedBrush}" FontSize="9" />
               <TextBlock Grid.Row="0" Grid.Column="3" Text="NORMAL / H" Foreground="{StaticResource MutedBrush}" FontSize="9" />
               <TextBlock Grid.Row="0" Grid.Column="4" Text="RESERVE / H" Foreground="{StaticResource MutedBrush}" FontSize="9" />
               <TextBlock Grid.Row="0" Grid.Column="5" Text="SAVE / H" Foreground="{StaticResource MutedBrush}" FontSize="9" />
@@ -153,7 +158,7 @@
                          Text="Complete all five Lab targets to calculate the plan."
                          TextWrapping="Wrap" />
             </Border>
-            <TextBlock Text="1x means no renewal. Active boosts continue to expiry. Automatic application is disabled."
+            <TextBlock Text="1x means no renewal. Reserve targets are a fallback forecast only. Active boosts continue to expiry. Automatic application is disabled."
                        TextWrapping="Wrap"
                        Foreground="{StaticResource MutedBrush}"
                        FontSize="10"

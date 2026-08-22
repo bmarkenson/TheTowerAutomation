@@ -4562,6 +4562,17 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert 'x:Name="CellBufferMetricPanel"' in native_xaml
     assert 'x:Name="LabSpeedPlanMetricPanel"' in native_xaml
     assert 'x:Name="LabSpeedPlanStatusText"' in native_xaml
+    assert '<UniformGrid Grid.Row="3"' not in native_xaml
+    assert (
+        '<StackPanel Grid.Row="3" Grid.Column="0"\n'
+        '                      x:Name="CellBalanceMetricPanel"'
+        in native_xaml
+    )
+    assert (
+        '<StackPanel Grid.Row="3" Grid.Column="3" Grid.ColumnSpan="3"\n'
+        '                      x:Name="LabSpeedPlanMetricPanel"'
+        in native_xaml
+    )
     assert 'JsonPropertyName("cell_balance")' in native_models
     assert "CellBalancePresenter.Present(" in native_code
     assert '"lab_speed_reserve_planner_v1"' in native_compatibility
@@ -4573,8 +4584,10 @@ def test_browser_activity_defaults_to_operational_narrative_levels():
     assert "SaveLabSpeedPolicyAsync" in native_code
     assert 'x:Name="CellReserveFloorTextBox"' in native_planner_xaml
     assert 'x:Name="Lab5ReserveSpeedBox"' in native_planner_xaml
+    assert "Accepted examples: 20M, 20,000,000" in native_planner_xaml
     assert "Automatic application is disabled." in native_planner_xaml
     assert "public void UpdateStatus(" in native_planner_code
+    assert "CellReserveInputParser.TryNormalize(" in native_planner_code
     assert 'JsonPropertyName("lab_speed_plan")' in native_models
     assert "RenderLabSpeedPlan(status.LabSpeedPlan)" in native_code
     assert '"emulator_host_selection_v1"' in native_compatibility

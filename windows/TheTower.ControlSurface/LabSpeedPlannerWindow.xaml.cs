@@ -204,12 +204,9 @@ public partial class LabSpeedPlannerWindow : Window
         out string? floor,
         out List<LabPolicyDraftItem> labs)
     {
-        floor = CellReserveFloorTextBox.Text.Trim();
-        if (floor.Length == 0)
-        {
-            floor = null;
-        }
-        else if (floor.Length > 36 || !floor.All(char.IsAsciiDigit))
+        if (!CellReserveInputParser.TryNormalize(
+                CellReserveFloorTextBox.Text,
+                out floor))
         {
             labs = [];
             return false;
@@ -334,7 +331,7 @@ public partial class LabSpeedPlannerWindow : Window
         {
             LabNormalProjectionText.Text = "Invalid draft";
             LabReserveProjectionText.Text = "Invalid draft";
-            LabRecommendationText.Text = "For each Lab, choose both targets or leave both blank; keep reserve at or below normal and enter a whole-number Cell reserve.";
+            LabRecommendationText.Text = "For each Lab, choose both targets or leave both blank; keep reserve at or below normal and enter a nonnegative whole-Cell warning floor such as 20M or 20,000,000.";
             LabRecommendationText.Foreground = new SolidColorBrush(
                 Color.FromRgb(241, 191, 91));
         }
@@ -422,7 +419,7 @@ public partial class LabSpeedPlannerWindow : Window
             ShowError(new InvalidOperationException(
                 "For each Lab, choose both targets or leave both blank, keep "
                     + "reserve no higher than normal, and enter a nonnegative "
-                    + "whole-number Cell reserve."));
+                    + "whole-Cell warning floor such as 20M or 20,000,000."));
             return;
         }
 
