@@ -39,6 +39,27 @@ resolved dossier instead of copying its detail.
 - Verified no external references to `input_named.py`
 - Confirmed no remaining hardcoded `coords/` paths after migration
 
+### 2026-08-22 Menu-owned Lab Speedup planner
+
+- Exact implementation candidate `43a324f` removes the full native Lab
+  Speedup planner from Overview and opens it on demand from **Tools > Lab
+  Speedup planner…**. Reopening the command activates the existing non-modal
+  window, and status polling refreshes its evidence without replacing an
+  unsaved draft.
+- The account status row now places **Lab Speedup Plan** beside Cell Balance,
+  Cell Net Trend, and Cell Buffer. It compactly reports the configured normal
+  targets and projected net Cell flow, or the incomplete/invalid state. Both
+  the row and planner identify those targets as planning evidence rather than
+  active Lab speeds; automatic application remains disabled.
+- At exact candidate `43a324f`, all 127 Control Surface Python tests and all
+  245 portable .NET authoring tests passed. The Release WindowsDesktop
+  cross-build succeeded with only the established read-only NuGet
+  vulnerability-cache `NU1900` warnings, using development-environment
+  fingerprint
+  `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
+  Cross-building does not establish WPF runtime behavior; the bounded Windows
+  visual/menu validation remains pending.
+
 ### 2026-08-21 Phase-aware GUI elapsed timer
 
 - Exact implementation candidate `1acb501` preserves the activity/report
