@@ -59,6 +59,17 @@ resolved dossier instead of copying its detail.
   `52fc6f62f302d9ed5f392ffb260e20d9b30cf98f4362cd240ef1569b69693ef7`.
   Cross-building does not establish WPF runtime behavior; the bounded Windows
   visual/menu validation remains pending.
+- Exact correction candidate `8cebf13` aligns the account row with the six
+  established status columns, gives the longer Lab plan the remaining three
+  columns, and accepts `20M`, `20,000,000`, or `20000000` as the same exact
+  reserve warning floor. Cell Buffer now shows that floor together with
+  above/below headroom and states that no Cells are set aside; reserve Lab
+  targets remain a non-applying fallback forecast.
+- At exact correction candidate `8cebf13`, all 127 Control Surface Python tests
+  and all 262 portable .NET authoring tests passed. The Release WindowsDesktop
+  cross-build again succeeded with only the established read-only NuGet
+  vulnerability-cache `NU1900` warnings using the same development-environment
+  fingerprint.
 
 ### 2026-08-21 Phase-aware GUI elapsed timer
 
